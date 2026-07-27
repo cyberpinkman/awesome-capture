@@ -4,8 +4,6 @@
 
 一组面向本地 AI Agent 的模块化信息捕获 skills：下载公开视频、转写音视频、把内容结构化写入 Obsidian，以及按用户习惯搭建 Obsidian 知识库。
 
-项目追求的不是一个无所不包的大 skill，而是四个职责清晰、可以独立使用、也能通过稳定文件契约组合的 skill。
-
 > 当前实测环境：Apple Silicon macOS，Python 3.9–3.14。
 > 当前能力边界：单个公开视频、本地音视频、本地 Obsidian vault；不支持 DRM、付费、私密内容或登录绕过。
 
@@ -307,7 +305,6 @@ python3 skills/ingest-knowledge/scripts/knowledge_writer.py commit \
 - 仓库回归测试与公开结构检查：22/22；
 - GitHub Actions 会在 Python 3.9、3.13、3.14 上运行同一套离线测试；
 - 四个 skill 均通过结构校验；
-- 当前安装副本与仓库源码一致；
 - `yt-dlp 2026.07.04` 已实际下载并经 `ffprobe` 验证 Douyin、TikTok、Bilibili、YouTube、X/Twitter 的公开样本；
 - Douyin 隔离 Chromium 临时会话完成真实回退下载，未读取个人浏览器配置；
 - TikTok 的 `yt-dlp → gallery-dl` 回退已用确定失败的主引擎测试替身触发并真实下载；
@@ -327,15 +324,18 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 
 ```text
 .
+├── .github/workflows/tests.yml
 ├── AGENTS.md
 ├── LICENSE
 ├── README.md
+├── SECURITY.md
 ├── skills/
 │   ├── download-video/
 │   ├── transcribe-media/
 │   ├── ingest-knowledge/
 │   └── build-obsidian-vault/
 └── tests/
+    ├── test_repository.py
     └── test_skills.py
 ```
 
@@ -362,12 +362,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 4. 用真实代表性样本验证外部工具；
 5. 更新 `AGENTS.md`、目标 `SKILL.md` 和相关 reference；
 6. 不把平台登录绕过、远程上传或知识库写入作为隐式副作用。
-
-## 本地历史项目取舍
-
-- 从 `my-knowledge-base` 保留了结构化笔记、来源追踪、Obsidian 文件工作流与去重思路；没有沿用静默覆盖和宽泛异常吞噬。
-- 从 `video learning` 保留了媒体探测、hash、时间戳转写、分块和续跑思路；没有沿用空转写仍报成功、固定假说话人、100 KB 文件阈值或声明式未落地的平台适配器。
-- 没有整体 fork 任一项目，也没有包含其源码。
 
 ## 贡献
 
