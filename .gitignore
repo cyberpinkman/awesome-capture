@@ -1,0 +1,58 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.cookie
+*.cookies
+*.cookies.txt
+cookies.txt
+auth.json
+
+# Download and transcription artifacts may contain signed URLs, absolute paths,
+# source content, or other private metadata.
+*.info.json
+*.artifact.json
+state.json
+transcript.json
+transcript.md
+transcript.txt
+transcript.srt
+transcript.vtt
+chunks/
+.awesome-capture/
+.obsidian/
+
+# Downloaded media and local model weights
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
+*.m4v
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.ogg
+*.bin
+*.gguf
+*.safetensors
+*.onnx
+
+# Common runtime output
+downloads/
+output/
+outputs/
+*.part
+*.tmp
+*.log
+
+# Test and coverage caches
+.pytest_cache/
+.coverage
+htmlcov/

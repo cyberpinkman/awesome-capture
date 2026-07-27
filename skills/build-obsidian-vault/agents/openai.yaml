@@ -1,0 +1,4 @@
+interface:
+  display_name: "构建知识库"
+  short_description: "通过需求访谈生成可维护、无第三方插件依赖的 Obsidian 知识库"
+  default_prompt: "Use $build-obsidian-vault to interview me and create an Obsidian vault that fits my workflow."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "知识入库"
+  short_description: "把已验证内容整理为可去重、可追溯的 Obsidian 知识笔记"
+  default_prompt: "Use $ingest-knowledge to structure this transcript and save it into my Obsidian vault."

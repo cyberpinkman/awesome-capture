@@ -1,0 +1,4 @@
+interface:
+  display_name: "下载视频"
+  short_description: "识别五大平台链接并下载经过媒体完整性验证的本地视频"
+  default_prompt: "Use $download-video to identify this social video URL and download a verified local copy."

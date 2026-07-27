@@ -1,0 +1,4 @@
+interface:
+  display_name: "内容转写"
+  short_description: "将本地音视频转写为带时间戳、可续跑且可追溯的结构化文本"
+  default_prompt: "Use $transcribe-media to turn this local media file into a timestamped transcript."
