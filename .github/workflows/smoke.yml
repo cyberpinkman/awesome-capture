@@ -65,19 +65,31 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Install required POSIX media tools
-        timeout-minutes: 5
+        timeout-minutes: 7
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            update
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Dpkg::Lock::Timeout=60 \
-            install --yes --no-install-recommends ffmpeg
+          for attempt in 1 2; do
+            echo "Installing ffmpeg (attempt ${attempt}/2)"
+            if sudo timeout --kill-after=10s 45s \
+              apt-get \
+                -o Acquire::Retries=1 \
+                -o Acquire::http::Timeout=15 \
+                -o Acquire::https::Timeout=15 \
+                update &&
+              sudo timeout --kill-after=10s 120s \
+              apt-get \
+                -o Acquire::Retries=1 \
+                -o Acquire::http::Timeout=15 \
+                -o Acquire::https::Timeout=15 \
+                -o Dpkg::Lock::Timeout=30 \
+                install --yes --no-install-recommends ffmpeg; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 2 ]; then
+              sudo timeout --kill-after=5s 30s dpkg --configure -a || true
+            fi
+          done
+          exit 1
 
       - name: Verify tools without installing credentials
         run: |

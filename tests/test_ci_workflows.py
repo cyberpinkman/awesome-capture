@@ -48,16 +48,21 @@ class CiWorkflowTests(unittest.TestCase):
         )
         linux, macos = workflow.split("  macos-posix:", 1)
 
-        linux_update = "            update\n"
+        linux_update = "update &&"
         linux_install = "install --yes --no-install-recommends ffmpeg"
         macos_install = "brew install ffmpeg"
         preflight = "- name: Verify required POSIX media tools"
 
-        self.assertIn("timeout-minutes: 5", linux)
-        self.assertIn("Acquire::Retries=3", linux)
-        self.assertIn("Acquire::http::Timeout=30", linux)
-        self.assertIn("Acquire::https::Timeout=30", linux)
-        self.assertIn("Dpkg::Lock::Timeout=60", linux)
+        self.assertIn("max-parallel: 2", linux)
+        self.assertIn("timeout-minutes: 7", linux)
+        self.assertIn("for attempt in 1 2", linux)
+        self.assertIn("timeout --kill-after=10s 45s", linux)
+        self.assertIn("timeout --kill-after=10s 120s", linux)
+        self.assertIn("Acquire::Retries=1", linux)
+        self.assertIn("Acquire::http::Timeout=15", linux)
+        self.assertIn("Acquire::https::Timeout=15", linux)
+        self.assertIn("Dpkg::Lock::Timeout=30", linux)
+        self.assertIn("dpkg --configure -a", linux)
         self.assertIn(linux_update, linux)
         self.assertIn(linux_install, linux)
         self.assertLess(linux.index(linux_update), linux.index(linux_install))
@@ -91,13 +96,17 @@ class CiWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
         public_download, _ = workflow.split("  local-posix-asr:", 1)
-        update = "            update\n"
+        update = "update &&"
         install = "install --yes --no-install-recommends ffmpeg"
         preflight = "- name: Verify tools without installing credentials"
 
-        self.assertIn("timeout-minutes: 5", public_download)
-        self.assertIn("Acquire::Retries=3", public_download)
-        self.assertIn("Dpkg::Lock::Timeout=60", public_download)
+        self.assertIn("timeout-minutes: 7", public_download)
+        self.assertIn("for attempt in 1 2", public_download)
+        self.assertIn("timeout --kill-after=10s 45s", public_download)
+        self.assertIn("timeout --kill-after=10s 120s", public_download)
+        self.assertIn("Acquire::Retries=1", public_download)
+        self.assertIn("Dpkg::Lock::Timeout=30", public_download)
+        self.assertIn("dpkg --configure -a", public_download)
         self.assertIn(update, public_download)
         self.assertIn(install, public_download)
         self.assertLess(
