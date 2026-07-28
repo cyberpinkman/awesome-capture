@@ -41,6 +41,11 @@ jobs:
           --require-hashes
           -r requirements-ci.lock
 
+      - name: Install required POSIX media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+
       - name: Verify required POSIX media tools
         run: |
           command -v ffmpeg
@@ -93,6 +98,11 @@ jobs:
           --only-binary=:all:
           --require-hashes
           -r requirements-ci.lock
+
+      - name: Install required POSIX media tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install ffmpeg
 
       - name: Verify required POSIX media tools
         run: |
