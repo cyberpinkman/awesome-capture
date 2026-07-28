@@ -528,10 +528,26 @@ def _download_case(
         if warning_count:
             base["warnings"].append(f"download-reported-{warning_count}-warnings")
     expectation = case.get("expectation")
-    if expectation is not None:
+    if expectation is None:
+        observed = (
+            isinstance(artifact, dict)
+            and artifact["acquisition"]["auth_mode"] == "anonymous"
+            and artifact["acquisition"]["fallback"] in {None, "none"}
+        )
+        assertions.append(
+            {
+                "name": "anonymous-route-observed",
+                "passed": observed,
+            }
+        )
+    else:
         observed = (
             isinstance(artifact, dict)
             and artifact["acquisition"]["fallback"] == expectation
+            and (
+                expectation != "ephemeral_browser"
+                or artifact["acquisition"]["auth_mode"] == "ephemeral_browser"
+            )
         )
         assertions.append(
             {
@@ -1221,6 +1237,22 @@ def run_case(
                     work_dir,
                     runner=runner,
                 )
+    tool_versions = {
+        item["name"]: item["version"]
+        for item in details["tools"]
+        if isinstance(item, dict)
+        and isinstance(item.get("name"), str)
+        and isinstance(item.get("version"), str)
+    }
+    details["assertions"].append(
+        {
+            "name": "required-tools-observed",
+            "passed": all(
+                tool_versions.get(name) not in {None, "unavailable"}
+                for name in case["required_tools"]
+            ),
+        }
+    )
     outcome = (
         "pass"
         if details["assertions"]

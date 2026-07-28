@@ -128,16 +128,20 @@ def _required_assertions(case: dict[str, Any]) -> set[str]:
         required = {
             "registered-source-detected",
             "registered-platform-matches",
+            "required-tools-observed",
             "download-command-succeeded",
             "video-artifact-v2-valid",
             "video-media-reverified",
         }
         if case.get("expectation"):
             required.add(f"required-{case['expectation']}-observed")
+        else:
+            required.add("anonymous-route-observed")
         return required
     required = {
         "registered-local-media-exists",
         "explicit-local-model-exists",
+        "required-tools-observed",
         "transcription-command-succeeded",
         "transcript-artifact-v2-valid",
         "transcript-evidence-reverified",

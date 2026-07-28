@@ -241,6 +241,8 @@ class SmokeHarnessTests(unittest.TestCase):
                     {
                         "registered-source-detected",
                         "registered-platform-matches",
+                        "required-tools-observed",
+                        "anonymous-route-observed",
                         "download-command-succeeded",
                         "video-artifact-v2-valid",
                         "video-media-reverified",
@@ -293,6 +295,7 @@ class SmokeHarnessTests(unittest.TestCase):
                         "registered-local-media-exists",
                         "explicit-local-model-exists",
                         "explicit-local-binary-exists",
+                        "required-tools-observed",
                         "transcription-command-succeeded",
                         "transcript-artifact-v2-valid",
                         "transcript-evidence-reverified",
@@ -742,6 +745,69 @@ class SmokeHarnessTests(unittest.TestCase):
             self.assertEqual(receipt["outcome"], "fail")
             self.assertEqual(receipt["warnings"], ["download-error-download_failed"])
             self.assertTrue(path.is_file())
+            assertions = {
+                item["name"]: item["passed"] for item in receipt["assertions"]
+            }
+            self.assertFalse(assertions["required-tools-observed"])
+
+    def test_anonymous_case_records_unexpected_fallback_as_failed_assertion(self):
+        case = run_smoke.select_case("tiktok-anonymous")
+        artifact = {
+            "source": {
+                "platform": "tiktok",
+                "fingerprint": "a" * 64,
+            },
+            "acquisition": {
+                "auth_mode": "anonymous",
+                "fallback": "gallery-dl",
+                "warnings": [],
+            },
+            "producer": {
+                "tool": "yt-dlp",
+                "version": "2026.07.04",
+            },
+        }
+        with (
+            mock.patch.object(
+                run_smoke,
+                "_detect_download_source",
+                return_value=("tiktok", "a" * 64, True),
+            ),
+            mock.patch.object(
+                run_smoke,
+                "_run_json",
+                return_value=(
+                    0,
+                    {"artifact_path": "/private/tmp/fixture-artifact.json"},
+                    "",
+                ),
+            ),
+            mock.patch.object(run_smoke, "read_json_strict", return_value=artifact),
+            mock.patch.object(run_smoke, "validate_file_context"),
+            mock.patch.object(run_smoke, "_reverify_video_media", return_value=True),
+            mock.patch.object(run_smoke, "_sha256_file", return_value="b" * 64),
+            mock.patch.object(
+                run_smoke,
+                "collect_tools",
+                return_value=[
+                    {"name": "python", "version": "3.14.0"},
+                    {"name": "ffmpeg", "version": "8.1"},
+                    {"name": "ffprobe", "version": "8.1"},
+                    {"name": "yt-dlp", "version": "2026.07.04"},
+                ],
+            ),
+        ):
+            details = run_smoke._download_case(
+                case,
+                "https://www.tiktok.com/@public/video/1",
+                Path("/private/tmp/unused-smoke-work"),
+                runner=mock.Mock(),
+            )
+
+        assertions = {
+            item["name"]: item["passed"] for item in details["assertions"]
+        }
+        self.assertFalse(assertions["anonymous-route-observed"])
 
     def test_cli_interrupt_uses_sanitized_json_protocol(self):
         stdout = io.StringIO()
@@ -912,6 +978,11 @@ class SmokeHarnessTests(unittest.TestCase):
             self.assertEqual(receipt["outcome"], "pass")
             self.assertEqual(receipt["source"]["fingerprint"], fingerprint)
             self.assertEqual(receipt["artifacts"][0]["type"], "video-artifact")
+            assertions = {
+                item["name"]: item["passed"] for item in receipt["assertions"]
+            }
+            self.assertTrue(assertions["anonymous-route-observed"])
+            self.assertTrue(assertions["required-tools-observed"])
             serialized = path.read_text(encoding="utf-8")
             self.assertNotIn(canonical_url, serialized)
             self.assertNotIn(str(Path(temporary)), serialized)
