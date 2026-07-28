@@ -44,6 +44,8 @@
   recover，支持在已验证边界内恢复进程崩溃。
 - Vault build 与 ingest 的跨日复跑和并发请求使用稳定内容身份；相同请求
   复用结果，不同内容返回明确冲突。
+- Vault 首次建库并发时会区分内部持久锁与用户已有内容，避免因进程调度误报
+  `EXISTING_VAULT_REQUIRES_OPT_IN`。
 - whisper.cpp GPU 失败与 CPU 回退相互隔离；GPU 或 CPU 崩溃不会被记录为
   空转写。
 

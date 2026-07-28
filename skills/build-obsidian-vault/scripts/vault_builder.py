@@ -610,6 +610,80 @@ def is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def vault_root_state(vault: Path) -> str:
+    """Classify user-visible vault state without counting lock scaffolding.
+
+    A writer must create ``.awesome-capture/vault.lock`` before it can hold the
+    vault lock.  Another writer can observe that safe, persistent scaffold in
+    the short interval before either process acquires the lock.  Treating it as
+    user content makes the outcome depend on process scheduling.  Only an empty
+    metadata directory or one containing the exact safe lock file is ignored;
+    every other entry still requires explicit existing-vault authorization.
+    """
+
+    try:
+        metadata = vault.lstat()
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return "existing"
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        return "existing"
+
+    root_descriptor = -1
+    metadata_descriptor = -1
+    lock_descriptor = -1
+    try:
+        root_descriptor = _open_root(vault)
+        root_entries = set(os.listdir(root_descriptor))
+        if not root_entries:
+            return "empty"
+        if root_entries != {".awesome-capture"}:
+            return "existing"
+
+        metadata_descriptor = os.open(
+            ".awesome-capture",
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=root_descriptor,
+        )
+        metadata = os.fstat(metadata_descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            return "existing"
+        metadata_entries = set(os.listdir(metadata_descriptor))
+        if not metadata_entries:
+            return "empty"
+        if metadata_entries != {"vault.lock"}:
+            return "existing"
+
+        lock_descriptor = os.open(
+            "vault.lock",
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=metadata_descriptor,
+        )
+        lock_metadata = os.fstat(lock_descriptor)
+        if (
+            not stat.S_ISREG(lock_metadata.st_mode)
+            or lock_metadata.st_uid != os.geteuid()
+            or lock_metadata.st_nlink != 1
+            or stat.S_IMODE(lock_metadata.st_mode) != 0o600
+        ):
+            return "existing"
+        return "empty"
+    except (OSError, VaultError):
+        return "existing"
+    finally:
+        if lock_descriptor >= 0:
+            os.close(lock_descriptor)
+        if metadata_descriptor >= 0:
+            os.close(metadata_descriptor)
+        if root_descriptor >= 0:
+            os.close(root_descriptor)
+
+
 def build_plan(config: dict[str, Any], vault: Path) -> dict[str, Any]:
     vault = validate_vault_target(vault)
     files = desired_files(config)
@@ -656,7 +730,7 @@ def build_plan(config: dict[str, Any], vault: Path) -> dict[str, Any]:
                     if current == content and safe_mode
                     else conflicts
                 ).append(relative.as_posix())
-    root_state = "missing" if not vault.exists() else "empty" if vault.is_dir() and not any(vault.iterdir()) else "existing"
+    root_state = vault_root_state(vault)
     plan = {
         "status": "ok",
         "operation": "plan",
@@ -1358,7 +1432,6 @@ def build(
 ) -> dict[str, Any]:
     vault = validate_vault_target(vault)
     plan = build_plan(config, vault)
-    initial_root_state = plan["root_state"]
     if not apply:
         return {**plan, "result": "dry-run"}
     if (
@@ -1420,7 +1493,11 @@ def build(
             }
         if expected_plan_sha256 is not None and expected_plan_sha256 != locked_plan["plan_sha256"]:
             raise VaultError("STALE_PLAN", "The vault changed after preview.", exit_code=4)
-        if initial_root_state == "existing" and not extend_existing and not matching_receipt:
+        if (
+            locked_plan["root_state"] == "existing"
+            and not extend_existing
+            and not matching_receipt
+        ):
             raise VaultError(
                 "EXISTING_VAULT_REQUIRES_OPT_IN",
                 "Target is non-empty; --extend-existing is required.",

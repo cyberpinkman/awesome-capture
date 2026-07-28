@@ -366,6 +366,57 @@ class VaultReceiptV1Tests(unittest.TestCase):
                 ["created", "unchanged"],
             )
 
+    def test_lock_scaffolding_is_not_existing_vault_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            vault = root / "Vault"
+            vault.mkdir(mode=0o700)
+            metadata = vault / ".awesome-capture"
+            metadata.mkdir(mode=0o700)
+            lock = metadata / "vault.lock"
+            lock.write_bytes(b"")
+            lock.chmod(0o600)
+
+            plan = vault_builder.build_plan(self.config(), vault)
+            self.assertEqual(plan["root_state"], "empty")
+            result = vault_builder.build(
+                self.config(),
+                vault,
+                apply=True,
+                extend_existing=False,
+                expected_plan_sha256=plan["plan_sha256"],
+            )
+            self.assertEqual(result["result"], "created")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            vault = root / "Vault"
+            vault.mkdir(mode=0o700)
+            metadata = vault / ".awesome-capture"
+            metadata.mkdir(mode=0o700)
+            lock = metadata / "vault.lock"
+            lock.write_bytes(b"")
+            lock.chmod(0o600)
+            unknown = metadata / "unknown"
+            unknown.write_bytes(b"external")
+            unknown.chmod(0o600)
+
+            plan = vault_builder.build_plan(self.config(), vault)
+            self.assertEqual(plan["root_state"], "existing")
+            with self.assertRaises(vault_builder.VaultError) as raised:
+                vault_builder.build(
+                    self.config(),
+                    vault,
+                    apply=True,
+                    extend_existing=False,
+                    expected_plan_sha256=plan["plan_sha256"],
+                )
+            self.assertEqual(
+                raised.exception.code,
+                "EXISTING_VAULT_REQUIRES_OPT_IN",
+            )
+            self.assertEqual(unknown.read_bytes(), b"external")
+
     def test_concurrent_different_build_configs_create_one_consistent_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
