@@ -400,6 +400,8 @@ ASR/硬件组合当前可用。对外发布受影响的平台或引擎时，应�
 `outcome: pass` 且匹配当前 `implementation_digest` 的正式脱敏 smoke
 receipt。receipt 时间仅作为审计记录，不设固定过期门槛；缺少匹配当前实现
 的 receipt 时，不应把旧实现或历史运行结果当作当前发布证据。
+正式 Release 会进一步要求全部预登记 smoke case 均有匹配 receipt；普通 PR
+CI 仍允许真实 receipt 目录为空。
 
 本地执行与 CI 相同的核心门禁：
 

@@ -46,6 +46,8 @@
   复用结果，不同内容返回明确冲突。
 - Vault 首次建库并发时会区分内部持久锁与用户已有内容，避免因进程调度误报
   `EXISTING_VAULT_REQUIRES_OPT_IN`。
+- Release 门禁会拒绝零份或仅覆盖部分预登记 case 的 smoke 证据，避免把普通
+  PR 的“允许无真实 smoke”规则误用于正式发布。
 - whisper.cpp GPU 失败与 CPU 回退相互隔离；GPU 或 CPU 崩溃不会被记录为
   空转写。
 

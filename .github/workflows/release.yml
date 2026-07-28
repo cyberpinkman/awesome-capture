@@ -69,7 +69,8 @@ jobs:
           python tools/sync_vendored.py --check
           python tools/smoke_receipts.py validate-existing \
             --require-pass \
-            --require-current-digest
+            --require-current-digest \
+            --require-all-cases
           python tools/check_repository_hygiene.py
           git diff --check
           repository_status="$(git status --porcelain)"

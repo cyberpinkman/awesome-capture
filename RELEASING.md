@@ -47,6 +47,12 @@ git diff --check
 digest、脱敏和 `outcome: pass` 校验，并匹配待发布实现；时间戳保留用于审计，
 不设置固定过期天数。不得用旧 implementation digest 的结果替代当前实现证据。
 
+正式 Release 当前要求 `smoke/cases.json` 中每个预登记 case 都有匹配证据。
+从 `manual smoke` workflow 下载 receipt artifact 后，应先逐份运行严格校验，
+再仅把通过校验的 JSON 保存为 `smoke/receipts/<case-id>.json` 并提交。普通 PR
+CI 可以在该目录为空时通过；Release workflow 会额外传入
+`--require-all-cases`，零份或部分 receipt 都会失败关闭。
+
 发布 commit 必须位于 `main`，并且该确切 commit SHA 的完整 tests workflow
 成功。不要仅依赖较早 commit、其他分支或部分 matrix job 的绿灯。
 

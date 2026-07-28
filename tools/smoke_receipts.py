@@ -300,6 +300,23 @@ def validate_receipt(
     }
 
 
+def validate_required_case_coverage(
+    receipts: list[dict[str, str]],
+) -> dict[str, int]:
+    required = set(load_case_registry())
+    covered = {receipt["case_id"] for receipt in receipts}
+    missing = sorted(required - covered)
+    if missing:
+        raise ContractError(
+            "SMOKE_EVIDENCE_MISSING",
+            "Required preregistered smoke evidence is missing.",
+        )
+    return {
+        "required_case_count": len(required),
+        "covered_case_count": len(required & covered),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -319,6 +336,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     existing_parser.add_argument("--require-pass", action="store_true")
     existing_parser.add_argument("--require-current-digest", action="store_true")
+    existing_parser.add_argument(
+        "--require-all-cases",
+        action="store_true",
+        help="Require validated evidence for every preregistered smoke case.",
+    )
     return parser
 
 
@@ -352,10 +374,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for path in paths
             ]
+            coverage = (
+                validate_required_case_coverage(receipts)
+                if args.require_all_cases
+                else {}
+            )
             result = {
                 "status": "ok",
                 "validated": receipts,
                 "receipt_count": len(receipts),
+                **coverage,
             }
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0

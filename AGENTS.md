@@ -151,6 +151,10 @@ Git tag 使用 `vX.Y.Z`，版本文件使用 `X.Y.Z`。`main` 是未发布开发
 python3 tools/release.py check
 ```
 
+正式 Release 当前还必须用 `validate-existing --require-pass
+--require-current-digest --require-all-cases` 验证全部预登记 smoke case；普通 PR
+CI 不使用 `--require-all-cases`，因此可在没有真实外部 smoke 时运行。
+
 ### Unified CLI JSON protocol
 
 四个 skill 的 CLI 成功时 stdout 恰好输出一个 JSON object、stderr 为空并退出 0；预期失败时 stdout 为空、stderr 恰好输出一个脱敏 JSON error。统一退出码为：
@@ -331,4 +335,7 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 - Playwright 1.60.0 + 隔离 Chromium；
 - `whisper.cpp 1.9.1`。
 
-版本号是可复现基线，不是永久上限。当前发布仍须为受影响路径提供 passing 且匹配当前 implementation digest 的 `awesome-capture.smoke-receipt/v1`；receipt 时间仅用于审计，不设固定过期门槛，也不得用历史实现的 receipt 替代当前实现证据。
+版本号是可复现基线，不是永久上限。路径验证应覆盖受影响平台与引擎；正式
+Release 当前进一步要求全部预登记 case 都有 passing 且匹配当前
+implementation digest 的 `awesome-capture.smoke-receipt/v1`。receipt 时间仅
+用于审计，不设固定过期门槛，也不得用历史实现的 receipt 替代当前实现证据。

@@ -526,6 +526,73 @@ class SmokeHarnessTests(unittest.TestCase):
                 "STALE_SMOKE_RECEIPT",
             )
 
+            empty_dir = root / "empty"
+            empty_dir.mkdir()
+            rejected_empty = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate-existing",
+                    "--directory",
+                    str(empty_dir),
+                    "--require-pass",
+                    "--require-current-digest",
+                    "--require-all-cases",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(rejected_empty.returncode, 2)
+            self.assertEqual(rejected_empty.stdout, "")
+            self.assertEqual(
+                json.loads(rejected_empty.stderr)["error"]["code"],
+                "SMOKE_EVIDENCE_MISSING",
+            )
+
+            rejected_partial = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate-existing",
+                    "--directory",
+                    str(passing_dir),
+                    "--require-pass",
+                    "--require-current-digest",
+                    "--require-all-cases",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(rejected_partial.returncode, 2)
+            self.assertEqual(rejected_partial.stdout, "")
+            self.assertEqual(
+                json.loads(rejected_partial.stderr)["error"]["code"],
+                "SMOKE_EVIDENCE_MISSING",
+            )
+
+    def test_release_coverage_requires_every_registered_case(self):
+        case_ids = set(smoke_receipts.load_case_registry())
+        complete = [
+            {
+                "path": f"/private/{case_id}.json",
+                "case_id": case_id,
+                "outcome": "pass",
+                "implementation_digest": "a" * 64,
+            }
+            for case_id in sorted(case_ids)
+        ]
+        coverage = smoke_receipts.validate_required_case_coverage(complete)
+        self.assertEqual(coverage["required_case_count"], len(case_ids))
+        self.assertEqual(coverage["covered_case_count"], len(case_ids))
+
+        with self.assertRaises(smoke_receipts.ContractError) as raised:
+            smoke_receipts.validate_required_case_coverage(complete[:-1])
+        self.assertEqual(raised.exception.code, "SMOKE_EVIDENCE_MISSING")
+
     def test_registered_case_platform_and_engine_mismatches_are_rejected(self):
         platform_mismatch = self.registered_download_receipt()
         platform_mismatch["source"]["platform"] = "tiktok"

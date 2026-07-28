@@ -167,7 +167,8 @@ class CiWorkflowTests(unittest.TestCase):
             (
                 "python tools/smoke_receipts.py validate-existing \\\n"
                 "            --require-pass \\\n"
-                "            --require-current-digest"
+                "            --require-current-digest \\\n"
+                "            --require-all-cases"
             ),
             "python tools/check_repository_hygiene.py",
             "git diff --check",
