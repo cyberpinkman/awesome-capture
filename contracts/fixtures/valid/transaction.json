@@ -1,0 +1,21 @@
+{
+  "schema_version": "awesome-capture.transaction/v1",
+  "transaction_id": "12345678-1234-4123-8123-123456789abc",
+  "kind": "ingest",
+  "status": "complete",
+  "created_at": "2026-07-27T00:00:00Z",
+  "job_id": "job-1",
+  "root": "/private/vault",
+  "staging_root": "/private/vault/.awesome-capture/transactions/job-1",
+  "steps": [
+    {
+      "index": 0,
+      "operation": "publish-receipt",
+      "source": "receipt.json",
+      "destination": ".awesome-capture/receipts/job-1.json",
+      "bytes": 100,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "published"
+    }
+  ]
+}

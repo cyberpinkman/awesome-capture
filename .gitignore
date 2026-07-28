@@ -25,6 +25,7 @@ transcript.srt
 transcript.vtt
 chunks/
 .awesome-capture/
+.awesome-capture-media/
 .obsidian/
 
 # Downloaded media and local model weights

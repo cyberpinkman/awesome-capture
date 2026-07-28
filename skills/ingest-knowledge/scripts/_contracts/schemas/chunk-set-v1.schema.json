@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/chunk-set-v1.schema.json",
+  "title": "Awesome Capture normalized chunk set v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "source_sha256",
+    "chunk_seconds",
+    "audio",
+    "count",
+    "total_duration_ms",
+    "chunks"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.chunk-set/v1"},
+    "job_id": {"$ref": "#/$defs/sha256"},
+    "source_sha256": {"$ref": "#/$defs/sha256"},
+    "chunk_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_rate", "channels", "sample_width"],
+      "properties": {
+        "sample_rate": {"const": 16000},
+        "channels": {"const": 1},
+        "sample_width": {"const": 2}
+      }
+    },
+    "count": {"type": "integer", "minimum": 1},
+    "total_duration_ms": {"type": "integer", "minimum": 1},
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "name",
+          "path",
+          "bytes",
+          "sha256",
+          "sample_frames",
+          "sample_rate",
+          "offset_ms",
+          "duration_ms"
+        ],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0},
+          "name": {
+            "type": "string",
+            "pattern": "^chunk-[0-9]{5,}\\.wav$",
+            "maxLength": 128
+          },
+          "path": {"$ref": "#/$defs/absolute_path"},
+          "bytes": {"type": "integer", "minimum": 45},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "sample_frames": {"type": "integer", "minimum": 1},
+          "sample_rate": {"const": 16000},
+          "offset_ms": {"type": "integer", "minimum": 0},
+          "duration_ms": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "absolute_path": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 4096,
+      "pattern": "^/"
+    }
+  }
+}

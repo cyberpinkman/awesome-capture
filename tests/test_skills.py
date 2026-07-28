@@ -114,7 +114,6 @@ class DownloadVideoTests(unittest.TestCase):
                 download_video.safe_platform_directory(output, "tiktok")
             self.assertEqual(symlinked.exception.code, "UNSAFE_OUTPUT_DIRECTORY")
 
-    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
     def test_ffprobe_accepts_a_valid_small_video_instead_of_using_a_size_threshold(self):
         with tempfile.TemporaryDirectory() as temporary:
             video = Path(temporary) / "tiny.mp4"
@@ -147,8 +146,7 @@ class DownloadVideoTests(unittest.TestCase):
             self.assertTrue(probed["has_audio"])
             self.assertGreater(probed["duration_seconds"], 0)
 
-    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
-    def test_gallery_fallback_reuses_a_verified_existing_asset(self):
+    def test_gallery_fallback_does_not_reuse_an_uncommitted_existing_asset(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             url = "https://www.tiktok.com/@u/video/1"
@@ -172,6 +170,7 @@ class DownloadVideoTests(unittest.TestCase):
                 ],
                 check=True,
             )
+            original_sha256 = hashlib.sha256(video.read_bytes()).hexdigest()
             args = argparse.Namespace(timeout=30)
             original = download_video.DownloadError("IP_BLOCKED", "blocked")
             real_require = download_video.require_tool
@@ -181,15 +180,19 @@ class DownloadVideoTests(unittest.TestCase):
 
             with mock.patch.object(download_video, "require_tool", side_effect=fake_require):
                 with mock.patch.object(download_video, "version_of", return_value="1.32.8"):
-                    result = download_video.gallery_download(
-                        args,
-                        url=url,
-                        platform_name="tiktok",
-                        output_root=root,
-                        original_error=original,
-                    )
-            self.assertEqual(Path(result["media_path"]), video)
-            self.assertIn("reused", result["manifest"]["acquisition"]["warnings"][0])
+                    with self.assertRaises(download_video.DownloadError) as raised:
+                        download_video.gallery_download(
+                            args,
+                            url=url,
+                            platform_name="tiktok",
+                            output_root=root,
+                            original_error=original,
+                        )
+            self.assertEqual(raised.exception.code, "INTEGRITY_FAILED")
+            self.assertEqual(
+                hashlib.sha256(video.read_bytes()).hexdigest(),
+                original_sha256,
+            )
 
 
 class TranscribeMediaTests(unittest.TestCase):
@@ -202,6 +205,7 @@ class TranscribeMediaTests(unittest.TestCase):
 
     def fake_whisper_cpp(self, root: Path) -> Path:
         executable = root / "fake-whisper-cli"
+        log_path = executable.with_suffix(".log")
         executable.write_text(
             "#!/usr/bin/env python3\n"
             "import json\n"
@@ -212,7 +216,7 @@ class TranscribeMediaTests(unittest.TestCase):
             "if '--version' in args:\n"
             "    print('whisper.cpp version: test-1.9.1')\n"
             "    raise SystemExit(0)\n"
-            "log = Path(sys.argv[0]).with_suffix('.log')\n"
+            f"log = Path({str(log_path)!r})\n"
             "with log.open('a', encoding='utf-8') as handle:\n"
             "    handle.write(json.dumps(args) + '\\n')\n"
             "if '-ng' not in args:\n"
@@ -265,7 +269,7 @@ class TranscribeMediaTests(unittest.TestCase):
             transcribe_media.media_path("https://youtu.be/example")
         self.assertEqual(raised.exception.code, "USE_DOWNLOAD_VIDEO")
 
-    def test_auto_never_selects_mlx_without_an_explicit_request(self):
+    def test_auto_never_selects_python_engines(self):
         with mock.patch.object(
             transcribe_media,
             "module_available",
@@ -280,12 +284,11 @@ class TranscribeMediaTests(unittest.TestCase):
             "module_available",
             side_effect=lambda name: name == "faster_whisper",
         ):
-            self.assertEqual(
-                transcribe_media.select_engine("auto"),
-                "faster-whisper",
-            )
+            with self.assertRaises(transcribe_media.TranscriptionError) as raised:
+                transcribe_media.select_engine("auto")
+        self.assertEqual(raised.exception.code, "ENGINE_UNAVAILABLE")
 
-    def test_python_engine_identity_records_runtime_package_versions(self):
+    def test_python_engines_reject_repository_model_ids(self):
         versions = {
             "faster-whisper": "1.2.3",
             "ctranslate2": "4.5.6",
@@ -297,28 +300,22 @@ class TranscribeMediaTests(unittest.TestCase):
             "package_version",
             side_effect=versions.get,
         ):
-            faster = transcribe_media.engine_identity_for(
-                "faster-whisper",
-                "small",
-                None,
-                None,
-                timeout=10,
-            )
-            mlx = transcribe_media.engine_identity_for(
-                "mlx-whisper",
-                "mlx-community/whisper-small",
-                None,
-                None,
-                timeout=10,
-            )
-        self.assertEqual(
-            faster["package_versions"],
-            {"faster-whisper": "1.2.3", "ctranslate2": "4.5.6"},
-        )
-        self.assertEqual(
-            mlx["package_versions"],
-            {"mlx-whisper": "0.4.2", "mlx": "0.30.0"},
-        )
+            for engine, model in (
+                ("faster-whisper", "small"),
+                ("mlx-whisper", "mlx-community/whisper-small"),
+            ):
+                with self.subTest(engine=engine):
+                    with self.assertRaises(
+                        transcribe_media.TranscriptionError
+                    ) as raised:
+                        transcribe_media.engine_identity_for(
+                            engine,
+                            model,
+                            None,
+                            None,
+                            timeout=10,
+                        )
+                    self.assertEqual(raised.exception.code, "MODEL_UNAVAILABLE")
 
     def test_whisper_cpp_retries_cpu_and_uses_actual_cumulative_chunk_offsets(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -334,6 +331,49 @@ class TranscribeMediaTests(unittest.TestCase):
             second_chunk = prepared / "chunk-00001.wav"
             self.write_wav(first_chunk, frames=20_000)
             self.write_wav(second_chunk, frames=40_000)
+
+            def publish_mock_chunks(
+                _source,
+                chunks_dir,
+                chunk_seconds,
+                _timeout,
+                *,
+                job_id,
+                source_sha256,
+                expected_duration_ms,
+            ):
+                self.assertEqual(expected_duration_ms, 3750)
+                chunks_dir.mkdir(parents=True)
+                os.chmod(chunks_dir, 0o700)
+                published = []
+                for source in (first_chunk, second_chunk):
+                    target = chunks_dir / source.name
+                    shutil.copyfile(source, target)
+                    os.chmod(target, 0o600)
+                    published.append(target)
+                timeline = transcribe_media.chunk_timeline(published)
+                manifest = {
+                    "schema_version": transcribe_media.CHUNK_SET_SCHEMA_VERSION,
+                    "job_id": job_id,
+                    "source_sha256": source_sha256,
+                    "chunk_seconds": chunk_seconds,
+                    "audio": {
+                        "sample_rate": 16000,
+                        "channels": 1,
+                        "sample_width": 2,
+                    },
+                    "count": len(timeline),
+                    "total_duration_ms": sum(
+                        item["duration_ms"] for item in timeline
+                    ),
+                    "chunks": timeline,
+                }
+                transcribe_media.safe_atomic_json(
+                    chunks_dir / "chunks.manifest.json",
+                    manifest,
+                )
+                return published
+
             args = argparse.Namespace(
                 media=str(media),
                 output_dir=str(root / "output"),
@@ -350,7 +390,7 @@ class TranscribeMediaTests(unittest.TestCase):
             media_metadata = {
                 "path": str(media),
                 "bytes": media.stat().st_size,
-                "duration_seconds": 3.75,
+                "duration_ms": 3750,
                 "container": "test",
                 "has_audio": True,
                 "has_video": False,
@@ -365,7 +405,7 @@ class TranscribeMediaTests(unittest.TestCase):
                 mock.patch.object(
                     transcribe_media,
                     "normalize_chunks",
-                    return_value=[first_chunk, second_chunk],
+                    side_effect=publish_mock_chunks,
                 ),
                 mock.patch.object(
                     transcribe_media,
@@ -379,7 +419,12 @@ class TranscribeMediaTests(unittest.TestCase):
                 Path(result["transcript_path"]).read_text(encoding="utf-8")
             )
             transcription = artifact["transcription"]
-            timeline = transcription["chunk_timeline"]
+            chunk_manifest = json.loads(
+                Path(
+                    transcription["chunk_set"]["manifest_path"]
+                ).read_text(encoding="utf-8")
+            )
+            timeline = chunk_manifest["chunks"]
             self.assertEqual(transcription["engine"], "whisper-cpp")
             self.assertEqual([item["offset_ms"] for item in timeline], [0, 1250])
             self.assertEqual([item["duration_ms"] for item in timeline], [1250, 2500])
@@ -390,13 +435,16 @@ class TranscribeMediaTests(unittest.TestCase):
             self.assertEqual(transcription["devices_used"], ["cpu"])
             self.assertEqual(transcription["gpu_fallback_count"], 1)
             identity = transcription["engine_identity"]
-            self.assertEqual(identity["binary_path"], str(executable.resolve()))
             self.assertEqual(
-                identity["binary_sha256"],
+                identity["executable"]["path"],
+                str(executable.resolve()),
+            )
+            self.assertEqual(
+                identity["executable"]["sha256"],
                 hashlib.sha256(executable.read_bytes()).hexdigest(),
             )
             self.assertEqual(
-                identity["model_sha256"],
+                identity["model"]["sha256"],
                 hashlib.sha256(model.read_bytes()).hexdigest(),
             )
             state = json.loads(Path(result["state_path"]).read_text(encoding="utf-8"))
@@ -419,53 +467,24 @@ class TranscribeMediaTests(unittest.TestCase):
                 [False, True, True],
             )
 
-            state["chunks"].pop("chunk-00001.wav")
-            Path(result["state_path"]).write_text(
-                json.dumps(state),
-                encoding="utf-8",
-            )
             with (
                 mock.patch.object(
                     transcribe_media,
                     "inspect_media",
                     return_value=media_metadata,
                 ),
-                mock.patch.object(
-                    transcribe_media,
-                    "normalize_chunks",
-                    return_value=[first_chunk, second_chunk],
-                ),
-                mock.patch.object(
-                    transcribe_media,
-                    "chunk_has_signal",
-                    return_value=True,
-                ),
             ):
                 resumed = transcribe_media.transcribe(args)
-            resumed_state = json.loads(
-                Path(resumed["state_path"]).read_text(encoding="utf-8")
-            )
-            resumed_runtime = resumed_state["chunks"]["chunk-00001.wav"]["runtime"]
-            self.assertFalse(resumed_runtime["gpu_attempted"])
-            self.assertTrue(resumed_runtime["gpu_disabled_after_failure"])
+            self.assertEqual(resumed["result"], "reused")
             resumed_invocations = [
                 json.loads(line)
                 for line in executable.with_suffix(".log")
                 .read_text(encoding="utf-8")
                 .splitlines()
             ]
-            self.assertEqual(len(resumed_invocations), 4)
-            self.assertIn("-ng", resumed_invocations[-1])
-            resumed_artifact = json.loads(
-                Path(resumed["transcript_path"]).read_text(encoding="utf-8")
-            )
-            self.assertEqual(
-                resumed_artifact["transcription"]["gpu_fallback_count"],
-                1,
-            )
+            self.assertEqual(len(resumed_invocations), 3)
 
-    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
-    def test_sidecar_transcription_emits_all_artifacts_and_propagates_download_source(self):
+    def test_sidecar_transcription_ignores_an_adjacent_legacy_artifact(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             audio = root / "sample.wav"
@@ -495,7 +514,7 @@ class TranscribeMediaTests(unittest.TestCase):
             Path(f"{audio}.artifact.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": transcribe_media.SCHEMA_VERSION,
+                        "schema_version": "awesome-capture.artifact/v1",
                         "artifact_type": "video",
                         "status": "complete",
                         "source": {
@@ -522,12 +541,10 @@ class TranscribeMediaTests(unittest.TestCase):
             artifact = json.loads(Path(result["transcript_path"]).read_text(encoding="utf-8"))
             self.assertEqual(result["segment_count"], 1)
             self.assertEqual(artifact["transcription"]["engine"], "sidecar-subtitle")
-            self.assertEqual(
-                artifact["source"]["upstream"]["url"],
-                "https://www.youtube.com/watch?v=test",
-            )
-            for key in ("markdown_path", "text_path", "srt_path", "vtt_path", "state_path"):
-                self.assertTrue(Path(artifact[key]).is_file(), key)
+            self.assertIsNone(artifact["source"]["upstream"])
+            for key in ("markdown", "text", "srt", "vtt", "state"):
+                self.assertTrue(Path(artifact["outputs"][key]["path"]).is_file(), key)
+            self.assertIsNone(artifact["outputs"]["chunk_manifest"])
 
 
 class VaultAndIngestIntegrationTests(unittest.TestCase):
@@ -542,7 +559,7 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
 
     def transcript(self, path: Path) -> Path:
         value = {
-            "schema_version": knowledge_writer.SCHEMA_VERSION,
+            "schema_version": "awesome-capture.artifact/v1",
             "artifact_type": "transcript",
             "status": "complete",
             "source": {
@@ -566,6 +583,7 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
             "text": "可核查的原始观点",
         }
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        path.chmod(0o600)
         return path
 
     def draft(self, path: Path) -> Path:
@@ -581,7 +599,7 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
 
     def test_build_is_idempotent_and_auditable(self):
         with tempfile.TemporaryDirectory() as temporary:
-            vault = Path(temporary) / "Vault"
+            vault = Path(temporary).resolve() / "Vault"
             first = vault_builder.build(
                 self.config(), vault, apply=True, extend_existing=False
             )
@@ -597,12 +615,11 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
                 vault_builder.build(
                     self.config(), vault, apply=True, extend_existing=False
                 )
-            self.assertEqual(raised.exception.code, "BUILD_CONFLICT")
+            self.assertEqual(raised.exception.code, "RECOVERY_CONFLICT")
 
-    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support required")
     def test_build_rejects_symlinked_managed_directories(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             vault = root / "Vault"
             outside = root / "outside"
             vault.mkdir()
@@ -619,11 +636,10 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
             vault_builder.build_plan(self.config(), Path.home())
         self.assertEqual(raised.exception.code, "UNSAFE_VAULT_TARGET")
 
-    def test_ingest_dry_run_commit_and_reuse(self):
+    def test_ingest_rejects_v1_transcript_before_dry_run(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             vault = root / "Vault"
-            vault_builder.build(self.config(), vault, apply=True, extend_existing=False)
             transcript = self.transcript(root / "transcript.json")
             draft = self.draft(root / "draft.md")
             base = dict(
@@ -636,95 +652,83 @@ class VaultAndIngestIntegrationTests(unittest.TestCase):
                 tag=["测试"],
                 allow_plain_folder=False,
             )
-            dry_run = knowledge_writer.commit(
-                argparse.Namespace(**base, dry_run=True)
+            with self.assertRaises(knowledge_writer.IngestError) as raised:
+                knowledge_writer.commit(argparse.Namespace(**base, dry_run=True))
+            self.assertEqual(
+                raised.exception.code,
+                "UNSUPPORTED_SCHEMA_VERSION",
             )
-            self.assertEqual(dry_run["result"], "dry-run")
-            self.assertFalse(Path(dry_run["knowledge_note"]).exists())
-            created = knowledge_writer.commit(
-                argparse.Namespace(**base, dry_run=False)
-            )
-            self.assertEqual(created["result"], "created")
-            note_path = Path(created["knowledge_note"])
-            source_path = Path(created["source_note"])
-            self.assertTrue(note_path.is_file())
-            self.assertTrue(source_path.is_file())
-            note = note_path.read_text(encoding="utf-8")
-            self.assertIn("source_url: \"https://www.youtube.com/watch?v=source\"", note)
-            self.assertIn("[[90 Sources/", note)
-            self.assertIn("\n# 测试：知识\n", note)
-            self.assertNotIn("\n# 测试知识\n", note)
-            reused = knowledge_writer.commit(
-                argparse.Namespace(**base, dry_run=False)
-            )
-            self.assertEqual(reused["result"], "reused")
-            self.assertEqual(reused["knowledge_note"], created["knowledge_note"])
-            self.assertEqual(reused["title"], "测试：知识")
-            self.assertEqual(reused["link_style"], "wikilink")
+            self.assertFalse(vault.exists())
 
-    def test_ingest_uses_portable_markdown_links_without_a_build_receipt(self):
+    def test_plain_folder_option_does_not_allow_a_v1_transcript(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             vault = root / "ExistingVault"
-            (vault / ".obsidian").mkdir(parents=True)
+            vault.mkdir()
             transcript = self.transcript(root / "transcript.json")
             draft = self.draft(root / "draft.md")
-            result = knowledge_writer.commit(
-                argparse.Namespace(
-                    transcript=str(transcript),
-                    document=str(draft),
-                    vault=str(vault),
-                    title="Portable link",
-                    collection="00 Inbox",
-                    sources_dir="90 Sources",
-                    tag=[],
-                    allow_plain_folder=False,
-                    dry_run=False,
-                    link_style="auto",
+            with self.assertRaises(knowledge_writer.IngestError) as raised:
+                knowledge_writer.commit(
+                    argparse.Namespace(
+                        transcript=str(transcript),
+                        document=str(draft),
+                        vault=str(vault),
+                        title="Portable link",
+                        collection="00 Inbox",
+                        sources_dir="90 Sources",
+                        tag=[],
+                        allow_plain_folder=True,
+                        dry_run=False,
+                        link_style="auto",
+                    )
                 )
+            self.assertEqual(
+                raised.exception.code,
+                "UNSUPPORTED_SCHEMA_VERSION",
             )
-            note = Path(result["knowledge_note"]).read_text(encoding="utf-8")
-            self.assertEqual(result["link_style"], "markdown")
-            self.assertIn(
-                "[原始转写](../90%20Sources/Portable%20link--",
-                note,
-            )
+            self.assertEqual(list(vault.iterdir()), [])
 
     def test_ingest_rejects_inconsistent_transcript_evidence(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            transcript_path = self.transcript(Path(temporary) / "transcript.json")
-            base = json.loads(transcript_path.read_text(encoding="utf-8"))
-            cases = []
+        base = json.loads(
+            (
+                ROOT
+                / "contracts"
+                / "fixtures"
+                / "valid"
+                / "transcript-artifact.json"
+            ).read_text(encoding="utf-8")
+        )
+        cases = []
 
-            mismatched_text = json.loads(json.dumps(base))
-            mismatched_text["text"] = "与分段不一致"
-            cases.append(mismatched_text)
+        mismatched_text = json.loads(json.dumps(base))
+        mismatched_text["text"] = "与分段不一致"
+        cases.append(mismatched_text)
 
-            missing_whisper_identity = json.loads(json.dumps(base))
-            missing_whisper_identity["transcription"] = {
-                "engine": "whisper-cpp",
-                "engine_identity": {},
-            }
-            cases.append(missing_whisper_identity)
+        missing_whisper_identity = json.loads(json.dumps(base))
+        missing_whisper_identity["transcription"] = {
+            "engine": "whisper-cpp",
+            "engine_identity": {},
+        }
+        cases.append(missing_whisper_identity)
 
-            invalid_timeline = json.loads(json.dumps(base))
-            invalid_timeline["transcription"] = {
-                "engine": "faster-whisper",
-                "chunk_timeline": [
-                    {
-                        "offset_ms": 10,
-                        "duration_ms": 100,
-                        "sha256": "b" * 64,
-                    }
-                ],
-            }
-            cases.append(invalid_timeline)
+        invalid_timeline = json.loads(json.dumps(base))
+        invalid_timeline["transcription"] = {
+            "engine": "faster-whisper",
+            "chunk_timeline": [
+                {
+                    "offset_ms": 10,
+                    "duration_ms": 100,
+                    "sha256": "b" * 64,
+                }
+            ],
+        }
+        cases.append(invalid_timeline)
 
-            for value in cases:
-                with self.subTest(transcription=value.get("transcription")):
-                    with self.assertRaises(knowledge_writer.IngestError) as raised:
-                        knowledge_writer.validate_transcript(value)
-                    self.assertEqual(raised.exception.code, "INVALID_TRANSCRIPT")
+        for value in cases:
+            with self.subTest(transcription=value.get("transcription")):
+                with self.assertRaises(knowledge_writer.IngestError) as raised:
+                    knowledge_writer.validate_transcript(value)
+                self.assertEqual(raised.exception.code, "INVALID_TRANSCRIPT")
 
 
 if __name__ == "__main__":

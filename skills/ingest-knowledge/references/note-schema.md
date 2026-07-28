@@ -45,3 +45,41 @@ Rules:
 - The writer owns YAML frontmatter. Do not put frontmatter in the draft.
 - Supply exactly one H1 and at least two H2 sections. On commit, the writer normalizes the H1 to the explicit `--title`; the source draft itself is not modified.
 - Follow the vault build receipt's `link_style` when available. Without a receipt, use URL-encoded relative Markdown links for editor portability.
+
+## Evidence and source availability
+
+- Treat the validated `awesome-capture.artifact/v2` transcript as the evidence boundary. The preserved source note is assembled from its text and timestamped segments, not by reopening the media.
+- Ingest does not read `source.path`, the upstream video artifact, or companion subtitle/output files by default. The source media may be deleted before ingest.
+- Use `--verify-source-media` only when the user explicitly requests a current media check. Missing media is recorded as unavailable; changed media is an integrity failure.
+- Do not promote a title, description, external page, or model-generated context to transcript evidence. Put externally sourced or unsupported claims under “待验证”.
+
+## Plan confirmation
+
+The dry-run describes the complete intended write and returns `plan_sha256`.
+Its internal `request_sha256` binds the canonical transcript artifact, exact
+draft bytes, title, collection and source folders, normalized tags, link
+style, and both destination paths. `plan_sha256` additionally binds the
+observed destination files, matching receipt, build receipt, and pending
+transactions so the exclusive-lock recheck can detect a stale vault view.
+
+- Review the rendered destinations before approval.
+- Pass the exact digest to the write with `--expected-plan-sha256`.
+- If any bound input changes, run a new dry-run and obtain new confirmation.
+- A digest is not a reusable approval token for another transcript, draft, title, layout, or vault state.
+
+## Writer-owned identity
+
+On commit, the writer creates both notes and owns their YAML identity fields, including the full 64-character `awesome_capture_id` and `source_sha256`.
+
+- Do not add these fields to the draft and do not change or remove them after commit.
+- Do not move or rename a managed note outside the writer workflow; the formal receipt records its relative path.
+- The knowledge-note body may be edited after ingest. If both identity fields still match, reuse and audit preserve the edits and report `CONTENT_MODIFIED` rather than overwriting them.
+- Missing or inconsistent identity frontmatter is a conflict, not an editable-content warning.
+- The formal `awesome-capture.ingest-receipt/v1` stores the transcript, draft,
+  request and confirmed-plan hashes, destinations, and initial file hashes. It
+  is published last and is the only completion marker.
+- The receipt filename is the complete stable ingest ID:
+
+  `SHA256("awesome-capture.ingest-id/v1\0" + canonical_transcript_artifact_sha256)`
+
+  Do not truncate, choose, or derive the ID from a media filename.

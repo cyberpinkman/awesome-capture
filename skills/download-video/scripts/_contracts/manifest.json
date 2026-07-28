@@ -1,0 +1,24 @@
+{
+  "contract_digest": "647ca3a9d65d2b11af4e6a4cbe65eabf7f40c778616de84f2ef07b5ce1359001",
+  "contract_files": {
+    "contract_runtime.py": "149f38e1fb3aaa3cc45b07a3f9a75fec6830d827d90f5400f9652d3ef7192816",
+    "schemas/artifact-transcript-v2.schema.json": "91991cfba6501c8a504b1eb5b1addee8291a8fc6683e991687b9c6859503c595",
+    "schemas/artifact-video-v2.schema.json": "8a6a1437d3c03afa3ff853e2df1805c0a210c1d5335f312561993c0e6bbecbd9",
+    "schemas/chunk-set-v1.schema.json": "54efe3053f40a22c88b41101d2950a5d2d0a16be423784521edb6731be65e51c",
+    "schemas/ingest-receipt-v1.schema.json": "d6a7245284c70ed17d8a79b775c345f8b6b79c73cfc7794de00ef274c6bf3851",
+    "schemas/smoke-receipt-v1.schema.json": "8ed0269e0dcb2cca96e1afb903f367e934d4ba7eab156ab4e8933aa5f83c8af7",
+    "schemas/transaction-v1.schema.json": "9e93388932d47cf8a3754ca39fc9ee76d5fc24c24b21b8a0b7812d55aeb0fe84",
+    "schemas/transcription-state-v1.schema.json": "33b5c926c4b7138e791353cb41b8604cc6b5282a8911889130bbc3b665686938",
+    "schemas/vault-build-receipt-v1.schema.json": "c30030446a37e3d033449836d406d06f66a935f6f8c9cd146453724365bd49bc",
+    "schemas/vault-config-v1.schema.json": "f1f59ae96c93b96c67b050003ae2e2e5777c99d7114b9330f869b88af849ef78"
+  },
+  "runtime_digest": "9f285dab9aa24fd8669a150bc3623c2c8f82a7ac787aeeb7fe8d6d9143fe873d",
+  "runtime_files": {
+    "__init__.py": "8d3329870b128345c9932f03fdc7cf6fbf92c20030e64f1061fcf2b26ade0b47",
+    "bundle_runtime.py": "67c09357b98f6417c6f84ebac7d5c82b027b32677a2dcfc001f502591f0dbe8f",
+    "media_runtime.py": "7e5e60715619e02984c5bae2f353f4e55c683f59ce66e3e5d444d8763a8f73a2",
+    "posix_runtime.py": "778aa280685851546d0d932a1af3456eaf6fbfcc1558fadc815dc48bdfb2d068",
+    "vault_runtime.py": "b58c1055d08fb13a4c49ccda3ba9921b90a37c4ef475b8d5ab409796b72d78e4"
+  },
+  "schema_version": "awesome-capture.contract-manifest/v1"
+}

@@ -1,0 +1,135 @@
+{
+  "schema_version": "awesome-capture.smoke-cases/v1",
+  "cases": [
+    {
+      "case_id": "douyin-anonymous",
+      "suite": "download",
+      "platform": "douyin",
+      "source_env": "AWESOME_CAPTURE_SMOKE_DOUYIN_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
+    },
+    {
+      "case_id": "tiktok-anonymous",
+      "suite": "download",
+      "platform": "tiktok",
+      "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
+    },
+    {
+      "case_id": "bilibili-anonymous",
+      "suite": "download",
+      "platform": "bilibili",
+      "source_env": "AWESOME_CAPTURE_SMOKE_BILIBILI_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
+    },
+    {
+      "case_id": "youtube-anonymous",
+      "suite": "download",
+      "platform": "youtube",
+      "source_env": "AWESOME_CAPTURE_SMOKE_YOUTUBE_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "deno", "yt-dlp-ejs"]
+    },
+    {
+      "case_id": "twitter-anonymous",
+      "suite": "download",
+      "platform": "twitter",
+      "source_env": "AWESOME_CAPTURE_SMOKE_TWITTER_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
+    },
+    {
+      "case_id": "douyin-ephemeral-browser",
+      "suite": "download",
+      "platform": "douyin",
+      "source_env": "AWESOME_CAPTURE_SMOKE_DOUYIN_BROWSER_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "playwright", "chromium"],
+      "expectation": "ephemeral_browser"
+    },
+    {
+      "case_id": "tiktok-gallery-fallback",
+      "suite": "download",
+      "platform": "tiktok",
+      "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
+      "expectation": "gallery-dl"
+    },
+    {
+      "case_id": "twitter-gallery-fallback",
+      "suite": "download",
+      "platform": "twitter",
+      "source_env": "AWESOME_CAPTURE_SMOKE_TWITTER_GALLERY_URL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
+      "expectation": "gallery-dl"
+    },
+    {
+      "case_id": "whisper-cpp-local",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "whisper-cpp",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_MODEL",
+      "binary_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_BIN",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "whisper-cpp"]
+    },
+    {
+      "case_id": "faster-whisper-local",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "faster-whisper",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_FASTER_MODEL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "faster-whisper"]
+    },
+    {
+      "case_id": "mlx-whisper-local",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "mlx-whisper",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_MLX_MODEL",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "mlx-whisper", "mlx"]
+    },
+    {
+      "case_id": "external-local",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "external",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL",
+      "binary_env": "AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "external-adapter"]
+    },
+    {
+      "case_id": "whisper-cpp-cpu",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "whisper-cpp",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_MODEL",
+      "binary_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_BIN",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "whisper-cpp"],
+      "expectation": "cpu_only"
+    },
+    {
+      "case_id": "whisper-cpp-gpu-fallback",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "whisper-cpp",
+      "source_env": "AWESOME_CAPTURE_SMOKE_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_MODEL",
+      "binary_env": "AWESOME_CAPTURE_SMOKE_WHISPER_CPP_FALLBACK_BIN",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "whisper-cpp"],
+      "expectation": "gpu_fallback"
+    },
+    {
+      "case_id": "external-long-resume",
+      "suite": "transcription",
+      "platform": "local",
+      "engine": "external",
+      "source_env": "AWESOME_CAPTURE_SMOKE_LONG_MEDIA",
+      "model_env": "AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL",
+      "binary_env": "AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "external-adapter"],
+      "expectation": "sigkill_resume"
+    }
+  ]
+}

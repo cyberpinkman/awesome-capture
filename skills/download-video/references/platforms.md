@@ -18,6 +18,9 @@ anti-bot initialization at the same speed.
 
 ## Required tools
 
+- Python 3.11 through 3.14 on macOS or Linux. Secure writes require POSIX
+  `fcntl`, `dir_fd`, no-follow directory opens, persistent advisory locks, and
+  directory `fsync`; there is no reduced-security fallback.
 - `yt-dlp[default,curl-cffi,deno]`: use 2026.07.04 or newer because extractors and security fixes change with the platforms.
 - `ffmpeg` and `ffprobe`: merge formats and verify that the result contains a playable video stream.
 - `deno`: use as yt-dlp's JavaScript runtime for YouTube challenges.
@@ -45,9 +48,61 @@ Run:
 
 ```bash
 python3 scripts/download_video.py doctor
+python3 scripts/download_video.py detect "<url>"
+python3 scripts/download_video.py probe "<url>"
 ```
 
-The doctor marks builds older than 2026.07.04 as below the tested baseline and date-based builds older than 90 days as stale. A warning is not proof that every extractor is broken, but production diagnosis must first use a current, smoke-tested version.
+The doctor marks builds older than 2026.07.04 as below the tested baseline and
+date-based builds older than 90 days as stale. It also reports
+`security_runtime.ready`; a false value blocks `download` and `recover`.
+A warning is not proof that every extractor is broken, but production
+diagnosis must first use a current, smoke-tested version.
+
+`detect` persists or prints only public query keys. `probe` performs network
+metadata extraction without downloading media; it is diagnostic evidence, not
+a successful download artifact.
+
+## Secure download and recovery
+
+Use an absolute output directory:
+
+```bash
+python3 scripts/download_video.py download "<url>" \
+  --output-dir "<absolute-dir>" \
+  --quality best \
+  --lock-timeout 30
+```
+
+The downloader creates
+`<output>/.awesome-capture-media/v2/{locks,staging,downloads,quarantine}`.
+All external media output is confined to a new `0700` staging directory.
+Before publication, the script requires exactly one safe media file and
+rechecks it with ffprobe, byte length, and SHA-256. Final media and JSON files
+are `0600`. A persistent source lock serializes the same URL; lock files remain
+after release.
+
+Publication follows the canonical `awesome-capture.transaction/v1` journal.
+Media and sanitized source metadata are no-clobber published and fsynced before
+`artifact.json`; that video artifact v2 is the final commit marker. An
+interrupted source transaction is recovered automatically before another
+download, or explicitly with:
+
+```bash
+python3 scripts/download_video.py recover \
+  --output-dir "<absolute-dir>" \
+  --lock-timeout 30
+```
+
+Recovery only completes steps whose source, destination, bytes, SHA-256,
+hardlink provenance, root, and journal agree. Unjournaled staging is moved to
+private quarantine. Unknown files, path changes, or mismatched journal copies
+produce `RECOVERY_CONFLICT` and are left intact for inspection.
+
+Reuse follows the same rule: only a complete
+`awesome-capture.artifact/v2` with the matching source fingerprint, local
+contract digest, regular single-link media, current hash, and current ffprobe
+facts is reusable. Legacy artifact v1, an unversioned manifest, and a bare
+preseeded gallery-dl file are rejected rather than adopted.
 
 ## Error policy
 
@@ -59,7 +114,25 @@ The doctor marks builds older than 2026.07.04 as below the tested baseline and d
 - `RATE_LIMITED`: wait or reduce request volume.
 - `CONTENT_UNAVAILABLE`: verify the URL in a normal browser; do not substitute another post.
 - `NETWORK_ERROR`: distinguish DNS/TLS/timeout from platform rejection.
-- `INTEGRITY_FAILED`: delete or quarantine the partial output; never pass it downstream.
+- `RESOURCE_BUSY`: another process holds the persistent source lock; wait or
+  choose a longer `--lock-timeout`, rather than deleting the lock.
+- `RECOVERY_CONFLICT`: managed state no longer matches its transaction; do not
+  overwrite or manually merge it without inspecting the reported output root.
+- `INTEGRITY_FAILED`: the isolated output failed type, stream, size, hash, or
+  path validation. The script retains it only inside private staging/quarantine;
+  never pass it downstream.
+- `UNSUPPORTED_SCHEMA_VERSION`: artifact v1, unversioned, or unknown contracts
+  are intentionally unsupported after the v2 breaking change.
+- `UNSUPPORTED_PLATFORM`: install/use Python 3.11–3.14 on a supported POSIX
+  runtime; do not bypass the capability check.
+
+Successful commands return one JSON object on stdout; command exceptions return
+one redacted JSON error on stderr with stdout empty. `doctor` follows the same
+contract: unavailable dependencies or platform capabilities produce a
+redacted error on stderr and exit 3 rather than a success-shaped status object
+on stdout. Signed query strings, Cookie values, authorization headers, tokens,
+signatures, passwords, and API keys must not appear in persisted metadata or
+reported error details.
 
 ## Primary references
 

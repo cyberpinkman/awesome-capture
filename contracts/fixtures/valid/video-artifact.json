@@ -1,0 +1,37 @@
+{
+  "schema_version": "awesome-capture.artifact/v2",
+  "artifact_type": "video",
+  "status": "complete",
+  "created_at": "2026-07-27T00:00:00Z",
+  "source": {
+    "platform": "youtube",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "media": {
+    "path": "/private/stage/video.mp4",
+    "bytes": 1024,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "duration_ms": 1000,
+    "has_video": true,
+    "has_audio": true,
+    "container": "mov,mp4",
+    "video_streams": 1,
+    "audio_streams": 1,
+    "ffprobe": {
+      "tool": "ffprobe",
+      "version": "8.1",
+      "evidence_sha256": "3f32a355529670015099f8fb9dfde8d96eb0bd40ebc4981a1add6c459499d7be"
+    }
+  },
+  "acquisition": {
+    "auth_mode": "anonymous",
+    "fallback": "none",
+    "warnings": []
+  },
+  "producer": {
+    "skill": "download-video",
+    "contract_digest": "647ca3a9d65d2b11af4e6a4cbe65eabf7f40c778616de84f2ef07b5ce1359001",
+    "tool": "yt-dlp",
+    "version": "2026.07.04"
+  }
+}

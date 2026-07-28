@@ -1,5 +1,11 @@
 # Vault config schema
 
+The builder's local generated Draft 2020-12 wire schema is
+[`scripts/_contracts/schemas/vault-config-v1.schema.json`](../scripts/_contracts/schemas/vault-config-v1.schema.json).
+The repository copy is the generation source, while a standalone skill reads
+only this vendored copy. This document explains its cross-field semantics;
+unknown keys and unknown versions are not accepted.
+
 Required JSON shape:
 
 ```json

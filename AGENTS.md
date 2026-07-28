@@ -42,12 +42,14 @@
 
 1. 调用 `download-video`。
 2. 要求下载 artifact：
+   - `schema_version == "awesome-capture.artifact/v2"`
    - `status == "complete"`
    - `media.has_video == true`
    - `media.path` 存在
-3. 读取 artifact 的 `media.path`，不要猜下载文件名。
-4. 把该本地路径交给 `transcribe-media`。
+3. 读取 artifact 的 `media.path` 和 artifact 自身绝对路径，不要猜下载文件名。
+4. 把媒体路径与显式 `--source-artifact` 一起交给 `transcribe-media`；消费者必须重新验证 contract digest、媒体 hash 和 ffprobe 证据。
 5. 要求 transcript artifact：
+   - `schema_version == "awesome-capture.artifact/v2"`
    - `artifact_type == "transcript"`
    - `status == "complete"`
    - source hash 存在
@@ -60,6 +62,9 @@
 
 1. 解析现有 vault 路径；没有路径时询问，不要扫描整个 home。
 2. 用 `knowledge_writer.py validate-transcript` 校验证据。
+   - 必须严格验证 transcript v2 的结构与内部语义；
+   - 默认不读取 `source.path` 或伴随输出；源媒体已删除不阻止入库；
+   - 只有用户明确要求 `--verify-source-media` 时才复验源媒体。
 3. 完整阅读 transcript。
 4. 按 `skills/ingest-knowledge/references/note-schema.md` 在 vault 外起草 Markdown：
    - 恰好一个 H1；
@@ -67,8 +72,8 @@
    - 重要结论带时间戳；
    - 推断明确标为推断；
    - 缺少证据的内容放入“待验证”。
-5. 先执行 `commit ... --dry-run`。
-6. 用户已明确授权后，移除 `--dry-run`。
+5. 先执行 `commit ... --dry-run`，保存返回的 `plan_sha256`。
+6. 用户已明确授权后，移除 `--dry-run` 并传入 `--expected-plan-sha256`。
 7. 重复写入必须返回 `reused`；不得制造重复笔记。
 
 `knowledge_writer.py` 不负责生成摘要或观点；Agent 负责基于完整证据起草。
@@ -80,20 +85,30 @@
 3. 在 vault 外生成 `awesome-capture.vault-config/v1` JSON。
 4. `validate-config`。
 5. `plan`，向用户展示路径、文件夹、模板、链接风格和冲突。
-6. 获得确认后 `build --apply`。
+6. 获得确认后 `build --apply --expected-plan-sha256 <plan_sha256>`。
 7. `audit`。
 
 `vault_builder.py` 不执行访谈，也不启动 Obsidian。
 
 ## 4. Contract Map
 
-### A. `awesome-capture.artifact/v1`
+### A. Formal Contract Bundle
 
-由下载和转写阶段使用。通过 `artifact_type` 与字段区分 video 和 transcript。
+Canonical schemas、stdlib validator、POSIX runtime 和 fixtures 位于根目录 `contracts/`。每个 skill 的 `scripts/_contracts/` 是由 `tools/sync_vendored.py --apply` 生成的 standalone 副本，不得手改。manifest 分别记录 wire schema/validator 的 `contract_digest` 与安全实现的 `runtime_digest`；加载时两组都必须通过本地 hash 复验。CI 使用 `--check` 拒绝任何副本漂移。
 
-- Video 交接核心：`status`、`media.path`、`media.sha256`、`media.has_video`。
-- Transcript 交接核心：`status`、`source.sha256`、`transcription.engine_identity`、`segments[]`、`text`。
-- 下游读取 artifact 中的绝对路径；不得通过目录扫描或文件名规则猜测。
+- Video/Transcript：`awesome-capture.artifact/v2`，通过 `artifact_type` 区分。
+- 转写 state：`awesome-capture.transcription-state/v1`。
+- 完整 chunks：`awesome-capture.chunk-set/v1`。
+- 恢复 journal：`awesome-capture.transaction/v1`。
+- 建库 receipt：`awesome-capture.vault-build-receipt/v1`。
+- 入库 receipt：`awesome-capture.ingest-receipt/v1`。
+- Smoke receipt：`awesome-capture.smoke-receipt/v1`。
+
+这是严格 breaking 切换：artifact/v1、无版本 state/receipt 和未知版本全部拒绝，不迁移、不双读、不覆盖。所有消费者都要重新执行结构、语义和已获授权的文件证据检查，不能只相信 `status: complete`。producer/consumer 的 `contract_digest` 必须一致。
+
+- Video 交接核心：`status`、来源 fingerprint、`media.path/bytes/sha256`、整数毫秒时长和流证据。
+- Transcript 交接核心：私有 source snapshot、内容级 engine/model/adapter identity、chunk-set、严格 `segments[]`、确定性 `text` 和全部输出 hashes。
+- 下游只读取显式给出的 artifact 路径；不得通过目录扫描或文件名规则猜测。
 - Cookie 值、API key、私有 header 和签名查询参数不得进入 artifact。
 
 完整 transcript 规则：`skills/transcribe-media/references/artifact-contract.md`。
@@ -104,7 +119,7 @@
 
 `skills/build-obsidian-vault/references/config-schema.md`
 
-构建回执：
+构建回执使用 `awesome-capture.vault-build-receipt/v1`：
 
 `<vault>/.awesome-capture/vault-build.json`
 
@@ -114,15 +129,31 @@
 
 `<vault>/.awesome-capture/receipts/<stable-id>.json`
 
-相同来源和 schema 应复用 receipt。存在路径但 receipt 不匹配时必须报冲突。
+稳定 ID 基于完整 transcript artifact SHA-256，而不是源媒体 hash。相同 transcript 和 draft/layout 应复用 receipt；不同 transcript 修订得到新 ID。存在路径但正式 receipt、笔记 identity 或预期相对路径不匹配时必须报冲突。
 
 ## 5. Repository-root Commands
 
 所有命令默认从仓库根目录运行。
 
+### Unified CLI JSON protocol
+
+四个 skill 的 CLI 成功时 stdout 恰好输出一个 JSON object、stderr 为空并退出 0；预期失败时 stdout 为空、stderr 恰好输出一个脱敏 JSON error。统一退出码为：
+
+| 退出码 | 含义 |
+|---:|---|
+| `2` | 参数、schema 或不安全输入/路径 |
+| `3` | 依赖、模型或平台能力不可用 |
+| `4` | 锁繁忙、冲突、恢复冲突或计划已过期 |
+| `5` | 外部工具、网络或运行时 I/O 失败 |
+| `7` | 契约、身份或文件证据完整性失败 |
+| `130` | 用户或系统中断 |
+
 ```bash
-# 全套离线测试
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+# 生成式 contract 副本必须与 canonical 完全一致
+python3 tools/sync_vendored.py --check
+
+# 全套离线测试；任何 skip 或 unexpected success 都失败
+PYTHONDONTWRITEBYTECODE=1 python3 tools/run_tests.py --fail-on-skip
 
 # 下载环境
 python3 skills/download-video/scripts/download_video.py doctor
@@ -139,6 +170,15 @@ python3 skills/transcribe-media/scripts/transcribe_media.py doctor \
 python3 skills/transcribe-media/scripts/transcribe_media.py inspect \
   "/absolute/path/to/media"
 
+# URL 下载结果必须显式交接 artifact；本地直传媒体可不带
+python3 skills/transcribe-media/scripts/transcribe_media.py transcribe \
+  "/absolute/path/to/media" \
+  --output-dir "/absolute/path/to/output" \
+  --source-artifact "/absolute/path/to/video.artifact.json" \
+  --engine auto \
+  --model "/absolute/path/to/model.bin" \
+  --whisper-cpp-bin "/absolute/path/to/whisper-cli"
+
 # Vault 配置检查和预览
 python3 skills/build-obsidian-vault/scripts/vault_builder.py validate-config \
   "/absolute/path/to/config.json"
@@ -146,9 +186,25 @@ python3 skills/build-obsidian-vault/scripts/vault_builder.py plan \
   "/absolute/path/to/config.json" \
   --vault "/absolute/path/to/vault"
 
+# 崩溃后先恢复，再重试写操作
+python3 skills/download-video/scripts/download_video.py recover \
+  --output-dir "/absolute/path/to/output"
+python3 skills/transcribe-media/scripts/transcribe_media.py recover \
+  --output-dir "/absolute/path/to/output"
+python3 skills/build-obsidian-vault/scripts/vault_builder.py recover \
+  --vault "/absolute/path/to/vault"
+python3 skills/ingest-knowledge/scripts/knowledge_writer.py recover \
+  --vault "/absolute/path/to/vault"
+
 # Transcript 证据检查
 python3 skills/ingest-knowledge/scripts/knowledge_writer.py validate-transcript \
   "/absolute/path/to/transcript.json"
+
+# Smoke receipt 只保存脱敏证据
+python3 tools/smoke_receipts.py digest
+python3 tools/smoke_receipts.py validate \
+  "/absolute/path/to/smoke-receipt.json" \
+  --require-pass --require-current-digest
 ```
 
 skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目录为当前工作目录的写法。
@@ -157,26 +213,34 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 
 ### Download
 
+- 写操作只支持 Python 3.11–3.14 的 macOS/Linux POSIX 环境；缺失 no-follow、dir-fd、`fcntl`、目录 `fsync`、原子 no-replace rename 或原子 exchange rename 时失败关闭。
 - 仅接受 Douyin、TikTok、Bilibili、YouTube、X/Twitter 的精确 host 后缀。
 - 默认单条视频；不得隐式展开 playlist。
 - `yt-dlp --ignore-config` 保持启用。
 - 缩略图、metadata、空文件、无视频流文件不算成功。
+- 外部下载器只能写私有 staging；子进程工作目录固定到已持有的 staging 目录 FD。转写媒体输入尽可能通过继承的只读 FD 交接。验证 bytes/hash/ffprobe 后才发布，artifact 必须最后写入。
+- 复用只接受内容与当前文件证据完全匹配的 artifact/v2；不得复用目录中预种或猜到的媒体。
 - 匿名失败后只允许平台规定的有限回退；不得无限重试。
 - 不绕过 DRM、付费、私密、地区或授权限制。
 
 ### Transcription
 
 - 本地媒体不得被静默上传到远程服务。
-- 不下载模型；模型由用户提供并记录 hash。
+- 不下载模型；每个 ASR 引擎都必须使用显式本地模型并记录确定性内容 hash。
+- whisper.cpp binary、external adapter 和本地模型必须在发布前重新哈希；运行期间身份变化必须中止。
+- `auto` 只选择显式配置的 whisper.cpp；external adapter 必须有用户的 `--trust-external-adapter` 确认。
 - 标题、简介和 LLM 重建不属于语音转写。
-- 续跑状态必须绑定来源、引擎、模型、设置和 chunk hash。
+- chunks 必须作为完整、连续、有 manifest 的集合整体发布；缺失、额外、断号或 hash 不匹配不能解释为空语音。
+- 续跑 state 必须绑定来源、引擎、模型、adapter、设置和 chunk-set hash。
 - whisper.cpp GPU 失败必须隔离，并允许 CPU 回退；不得把崩溃当空转写。
 
 ### Vault and Ingest
 
-- 先 preview/dry-run，再写入。
+- 先 preview/dry-run，再把返回的 `plan_sha256` 作为 `--expected-plan-sha256` 写入。
 - 不覆盖不同内容。
 - 拒绝 root、home、`.obsidian`、父路径穿越和受管目录 symlink。
+- build 与 ingest 共用持久 vault lock；journal 先落盘，receipt 最后发布。发现未完成事务时先 recover。
+- audit 只读：builder 检查正式 build receipt 与受管布局，knowledge writer 检查 ingest receipts、笔记 identity 和 pending transactions。
 - 不写 Obsidian 全局注册表，不启用 Sync，不安装社区插件。
 - 普通 Markdown/YAML 和 skill 自有 receipt 是持久化边界。
 
@@ -185,27 +249,29 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 ### 修改代码
 
 - 目标行为有测试；
-- `python3 -m unittest discover -s tests -v` 全部通过；
+- `python3 tools/sync_vendored.py --check` 通过；
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/run_tests.py --fail-on-skip` 全部通过且零 skip；
 - 未产生 `__pycache__`、模型、媒体、Cookie 或临时输出；
-- 修改了契约时同步更新生产者、消费者、测试、`SKILL.md` 和 reference；
-- 外部平台/引擎变化有真实 smoke test，不能只靠 mock。
+- 修改契约时只改 canonical，再生成 vendored 副本，并同步更新生产者、全部消费者、fixtures、测试、`SKILL.md` 和 reference；
+- 外部平台/引擎变化有真实 smoke test 和符合 `awesome-capture.smoke-receipt/v1` 的脱敏 receipt，不能只靠 mock。
 
 ### 下载任务
 
 - 返回绝对媒体路径和 artifact 路径；
-- artifact 为 complete；
+- artifact/v2 为 complete 且 consumer 可重新验证 contract digest；
 - `ffprobe` 验证视频流；
 - 报告实际 auth mode、fallback 和 warnings。
 
 ### 转写任务
 
-- 返回完整 transcript artifact 和所有文本/字幕路径；
+- 返回完整 transcript artifact/v2 和所有带 bytes/hash 的文本、字幕、state 路径；
 - 报告引擎、语言、时长、segment 数和 GPU fallback；
 - 非空语音才询问是否入库。
 
 ### 入库任务
 
 - 返回知识笔记、原始转写和 receipt 的绝对路径；
+- receipt 使用 `awesome-capture.ingest-receipt/v1`，稳定 ID 为完整 64 位 digest；
 - 报告 `created` 或 `reused`；
 - vault audit 无异常，或明确列出既有异常。
 
@@ -223,19 +289,22 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 1. 定义输入、输出、成功判据和副作用；
 2. 判断能否消费现有 artifact；
 3. 若不能，新增版本化契约，不猜目录；
-4. 实现确定性 script；
-5. 编写正向、负向、冲突、恢复和安全测试；
-6. 更新本文件的路由与契约图；
-7. 用真实代表性输入验证；
-8. 明确尚未支持的边界。
+4. 在 `contracts/` 更新 canonical schema/runtime，并用 `tools/sync_vendored.py --apply` 生成每个 standalone 副本；
+5. 实现确定性 script，并让全部消费者独立复验；
+6. 编写正向、负向、冲突、恢复和安全测试；
+7. 更新本文件的路由与契约图；
+8. 用真实代表性输入验证并产生脱敏 smoke receipt；
+9. 明确尚未支持的边界。
 
 推荐后续独立 skills：`download-batch`、`extract-webpage`、`extract-document`、`run-ocr`、`fact-check-content`。
 
 ## 9. Known Tested Baseline
 
-截至 2026-07-27：
+截至 2026-07-27，下列版本与结果是历史可复现基线，不是当前版本的发布证据：
 
-- Python 3.9、3.13、3.14 的完整仓库测试均为 22/22；
+- 支持 Python 3.11–3.14；CI 覆盖 Ubuntu 3.11–3.14 与 macOS 3.11、3.14，全部使用 no-skip runner；
+- `awesome-capture.artifact/v2` 为当前唯一可接受的媒体 artifact 版本；v1 是明确拒绝的 legacy 输入；
+- canonical/vendored contract sync 是 CI 门禁；
 - `yt-dlp 2026.07.04`；
 - FFmpeg/FFprobe 8.1；
 - Deno 2.9.4；
@@ -243,4 +312,4 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 - Playwright 1.60.0 + 隔离 Chromium；
 - `whisper.cpp 1.9.1`。
 
-版本号是可复现基线，不是永久上限。升级下载器或 ASR 后必须重新做代表性真实测试。
+版本号是可复现基线，不是永久上限。当前发布仍须为受影响路径提供 passing 且匹配当前 implementation digest 的 `awesome-capture.smoke-receipt/v1`；receipt 时间仅用于审计，不设固定过期门槛，也不得用历史实现的 receipt 替代当前实现证据。

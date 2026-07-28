@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/vault-config-v1.schema.json",
+  "title": "Awesome Capture vault config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "profile",
+    "language",
+    "folders",
+    "inbox_folder",
+    "sources_folder",
+    "attachments_folder",
+    "templates_folder",
+    "link_style"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "awesome-capture.vault-config/v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "profile": {
+      "enum": [
+        "general",
+        "research",
+        "creator",
+        "projects",
+        "custom"
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "folders": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/relativeFolder"
+      }
+    },
+    "inbox_folder": {
+      "$ref": "#/$defs/relativeFolder"
+    },
+    "sources_folder": {
+      "$ref": "#/$defs/relativeFolder"
+    },
+    "attachments_folder": {
+      "$ref": "#/$defs/relativeFolder"
+    },
+    "templates_folder": {
+      "$ref": "#/$defs/relativeFolder"
+    },
+    "link_style": {
+      "enum": [
+        "wikilink",
+        "markdown"
+      ]
+    },
+    "daily_notes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "folder",
+        "format"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "folder": {
+          "$ref": "#/$defs/relativeFolder"
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relativeFolder": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    }
+  }
+}

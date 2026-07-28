@@ -1,0 +1,39 @@
+{
+  "schema_version": "awesome-capture.smoke-receipt/v1",
+  "case_id": "youtube-anonymous",
+  "created_at": "2026-07-27T00:00:00Z",
+  "outcome": "pass",
+  "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "implementation_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "environment": {
+    "os": "linux",
+    "arch": "arm64",
+    "python": "3.14.1"
+  },
+  "tools": [
+    {
+      "name": "yt-dlp",
+      "version": "2026.07.04"
+    }
+  ],
+  "source": {
+    "platform": "youtube",
+    "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "auth_mode": "anonymous",
+    "fallback": null
+  },
+  "engine": null,
+  "artifacts": [
+    {
+      "type": "video-artifact",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "assertions": [
+    {
+      "name": "video-stream-present",
+      "passed": true
+    }
+  ],
+  "warnings": []
+}

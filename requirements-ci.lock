@@ -1,0 +1,57 @@
+# CI-only dependencies. Runtime skills remain Python-standard-library-only.
+#
+# Hashes are from the official PyPI release metadata. Compiled wheel hashes
+# cover CPython 3.11-3.14 on:
+#   - manylinux x86_64 (GitHub ubuntu-24.04)
+#   - macOS x86_64
+#   - macOS arm64
+#
+# Install with:
+#   python -m pip install --only-binary=:all: --require-hashes \
+#     -r requirements-ci.lock
+
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+
+# Hash order for compiled wheels: for each CPython 3.11 through 3.14,
+# manylinux x86_64, macOS x86_64, then macOS arm64.
+coverage==7.13.4 \
+    --hash=sha256:8e264226ec98e01a8e1054314af91ee6cde0eacac4f465cc93b03dbe0bce2fd7 \
+    --hash=sha256:d490ba50c3f35dd7c17953c68f3270e7ccd1c6642e2d2afe2d8e720b98f5a053 \
+    --hash=sha256:19bc3c88078789f8ef36acb014d7241961dbf883fd2533d18cb1e7a5b4e28b11 \
+    --hash=sha256:2c048ea43875fbf8b45d476ad79f179809c590ec7b79e2035c662e7afa3192e3 \
+    --hash=sha256:02231499b08dabbe2b96612993e5fc34217cdae907a51b906ac7fca8027a4459 \
+    --hash=sha256:40aa8808140e55dc022b15d8aa7f651b6b3d68b365ea0398f1441e0b04d859c3 \
+    --hash=sha256:b720ce6a88a2755f7c697c23268ddc47a571b88052e6b155224347389fdf6a3b \
+    --hash=sha256:b66a2da594b6068b48b2692f043f35d4d3693fb639d5ea8b39533c2ad9ac3ab9 \
+    --hash=sha256:3599eb3992d814d23b35c536c28df1a882caa950f8f507cef23d1cbf334995ac \
+    --hash=sha256:0dd7ab8278f0d58a0128ba2fca25824321f05d059c1441800e934ff2efa52129 \
+    --hash=sha256:300deaee342f90696ed186e3a00c71b5b3d27bffe9e827677954f4ee56969601 \
+    --hash=sha256:29e3220258d682b6226a9b0925bc563ed9a1ebcff3cad30f043eceea7eaf2689
+
+jsonschema==4.26.0 \
+    --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+
+jsonschema-specifications==2025.9.1 \
+    --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+
+referencing==0.37.0 \
+    --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+
+# Hash order matches coverage above.
+rpds-py==2026.6.3 \
+    --hash=sha256:9c1255b302953c86a486b81d330d5ee1d5bd937691ce271b6be0ef0e299eaab7 \
+    --hash=sha256:7b689145a1485c335569bd056464f3243a29af7ed3871c7be31ad624ba239bc7 \
+    --hash=sha256:db08f45aecde626498fb3df07bcf6d2ec040af42e859a4f5040d79c200342911 \
+    --hash=sha256:ecabd69db66de867690f9797f2f8fa27ba501bbc24540cbdbdc649cd15888ba6 \
+    --hash=sha256:a0811d33247c3d6128a3001d763f2aa056bb3425204335400ac54f89eec3a0d0 \
+    --hash=sha256:538949e262e46caa31ac01bdb3c1e8f642622922cacbabbae6a8445d9dc33eaf \
+    --hash=sha256:acac386b453c2516111b50985d60ce46e7fadb5ea71ae7b25f4c946935bf27cf \
+    --hash=sha256:3cfe765c1da0072636ca06628261e0ea05688e160d5c8a03e0217c3854037223 \
+    --hash=sha256:f4d78253f6996be4901669ad25319f842f740eccf4d58e3c7f3dd39e6dde1d8f \
+    --hash=sha256:dc319e5a1de4b6913aac94bf6a2f9e847371e0a140a43dd4991db1a09bc2d504 \
+    --hash=sha256:931908d9fc855d8f74783377822be318edb6dcb19e47169dc038f9a1bf60b06e \
+    --hash=sha256:d7469697dce35be237db177d42e2a2ee26e6dcc5fc052078a6fefabd288c6edd
+
+typing-extensions==4.16.0 ; python_version < "3.13" \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

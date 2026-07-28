@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/ingest-receipt-v1.schema.json",
+  "title": "Awesome Capture ingest receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "created_at",
+    "ingest_id",
+    "transcript_schema",
+    "transcript_artifact_sha256",
+    "transcript_semantic_sha256",
+    "source_sha256",
+    "draft_sha256",
+    "request_sha256",
+    "plan_sha256",
+    "title",
+    "knowledge_note",
+    "source_note",
+    "initial_files",
+    "link_style",
+    "segment_count",
+    "source_media_verification",
+    "producer"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.ingest-receipt/v1"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "ingest_id": {"$ref": "#/$defs/sha256"},
+    "transcript_schema": {"const": "awesome-capture.artifact/v2"},
+    "transcript_artifact_sha256": {"$ref": "#/$defs/sha256"},
+    "transcript_semantic_sha256": {"$ref": "#/$defs/sha256"},
+    "source_sha256": {"$ref": "#/$defs/sha256"},
+    "draft_sha256": {"$ref": "#/$defs/sha256"},
+    "request_sha256": {"$ref": "#/$defs/sha256"},
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 512},
+    "knowledge_note": {"$ref": "#/$defs/relative_path"},
+    "source_note": {"$ref": "#/$defs/relative_path"},
+    "initial_files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/file"}
+    },
+    "link_style": {"enum": ["wikilink", "markdown"]},
+    "segment_count": {"type": "integer", "minimum": 0},
+    "source_media_verification": {
+      "enum": ["not_checked", "not_available", "verified"]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill", "contract_digest"],
+      "properties": {
+        "skill": {"const": "ingest-knowledge"},
+        "contract_digest": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*(?:^|/)\\.\\.?$)[^\\\\\\u0000]+$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "identity_marker"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "identity_marker": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    }
+  }
+}

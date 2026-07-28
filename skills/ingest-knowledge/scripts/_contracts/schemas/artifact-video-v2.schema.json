@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/artifact-video-v2.schema.json",
+  "title": "Awesome Capture video artifact v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "status",
+    "created_at",
+    "source",
+    "media",
+    "acquisition",
+    "producer"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.artifact/v2"},
+    "artifact_type": {"const": "video"},
+    "status": {"const": "complete"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "fingerprint"],
+      "properties": {
+        "platform": {
+          "enum": ["douyin", "tiktok", "bilibili", "youtube", "twitter"]
+        },
+        "fingerprint": {"$ref": "#/$defs/sha256"},
+        "url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "webpage_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "title": {"type": "string", "maxLength": 4096},
+        "author": {"type": "string", "maxLength": 1024},
+        "extractor": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "bytes",
+        "sha256",
+        "duration_ms",
+        "has_video",
+        "has_audio",
+        "container",
+        "video_streams",
+        "audio_streams",
+        "ffprobe"
+      ],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolute_path"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "duration_ms": {"type": "integer", "minimum": 1},
+        "has_video": {"const": true},
+        "has_audio": {"type": "boolean"},
+        "container": {"type": "string", "minLength": 1, "maxLength": 128},
+        "video_streams": {"type": "integer", "minimum": 1},
+        "audio_streams": {"type": "integer", "minimum": 0},
+        "ffprobe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool", "version", "evidence_sha256"],
+          "properties": {
+            "tool": {"const": "ffprobe"},
+            "version": {"type": "string", "minLength": 1, "maxLength": 512},
+            "evidence_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "acquisition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auth_mode", "fallback", "warnings"],
+      "properties": {
+        "auth_mode": {
+          "enum": [
+            "anonymous",
+            "user_cookie_file",
+            "user_browser_cookie",
+            "ephemeral_browser"
+          ]
+        },
+        "fallback": {"type": "string", "minLength": 1, "maxLength": 256},
+        "warnings": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {"type": "string", "maxLength": 2000}
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill", "contract_digest", "tool", "version"],
+      "properties": {
+        "skill": {"const": "download-video"},
+        "contract_digest": {"$ref": "#/$defs/sha256"},
+        "tool": {"type": "string", "minLength": 1, "maxLength": 128},
+        "version": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "absolute_path": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 4096,
+      "pattern": "^/"
+    }
+  }
+}

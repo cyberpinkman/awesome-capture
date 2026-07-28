@@ -1,0 +1,176 @@
+name: manual smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: Preregistered smoke/cases.json alias
+        required: true
+        type: choice
+        options:
+          - douyin-anonymous
+          - tiktok-anonymous
+          - bilibili-anonymous
+          - youtube-anonymous
+          - twitter-anonymous
+          - douyin-ephemeral-browser
+          - tiktok-gallery-fallback
+          - twitter-gallery-fallback
+          - whisper-cpp-local
+          - whisper-cpp-cpu
+          - whisper-cpp-gpu-fallback
+          - faster-whisper-local
+          - mlx-whisper-local
+          - external-local
+          - external-long-resume
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  public-download:
+    if: ${{ contains(fromJSON('["douyin-anonymous","tiktok-anonymous","bilibili-anonymous","youtube-anonymous","twitter-anonymous","douyin-ephemeral-browser","tiktok-gallery-fallback","twitter-gallery-fallback"]'), inputs.case) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SMOKE_CASE: ${{ inputs.case }}
+      AWESOME_CAPTURE_SMOKE_DOUYIN_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_DOUYIN_URL }}
+      AWESOME_CAPTURE_SMOKE_TIKTOK_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TIKTOK_URL }}
+      AWESOME_CAPTURE_SMOKE_BILIBILI_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_BILIBILI_URL }}
+      AWESOME_CAPTURE_SMOKE_YOUTUBE_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_YOUTUBE_URL }}
+      AWESOME_CAPTURE_SMOKE_TWITTER_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TWITTER_URL }}
+      AWESOME_CAPTURE_SMOKE_DOUYIN_BROWSER_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_DOUYIN_BROWSER_URL }}
+      AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL }}
+      AWESOME_CAPTURE_SMOKE_TWITTER_GALLERY_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TWITTER_GALLERY_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Install pinned public acquisition tools
+        run: |
+          python -m pip install \
+            "yt-dlp[default,curl-cffi,deno]==2026.7.4" \
+            "deno==2.9.4" \
+            "gallery-dl==1.32.8" \
+            "playwright==1.60.0"
+          python -m playwright install --with-deps chromium
+
+      - name: Verify tools without installing credentials
+        run: |
+          command -v ffmpeg
+          command -v ffprobe
+          command -v yt-dlp
+          command -v deno
+          deno --version
+
+      - name: Run preregistered public smoke
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+        run: |
+          install -d -m 700 "$RECEIPT_DIR"
+          python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-pass --require-current-digest
+
+      - name: Upload sanitized receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  local-posix-asr:
+    if: ${{ contains(fromJSON('["whisper-cpp-local","whisper-cpp-cpu","whisper-cpp-gpu-fallback","faster-whisper-local","external-local","external-long-resume"]'), inputs.case) }}
+    runs-on:
+      - self-hosted
+      - awesome-capture-smoke
+      - linux
+    timeout-minutes: 120
+    env:
+      SMOKE_CASE: ${{ inputs.case }}
+      AWESOME_CAPTURE_SMOKE_MEDIA: ${{ vars.AWESOME_CAPTURE_SMOKE_MEDIA }}
+      AWESOME_CAPTURE_SMOKE_WHISPER_CPP_MODEL: ${{ vars.AWESOME_CAPTURE_SMOKE_WHISPER_CPP_MODEL }}
+      AWESOME_CAPTURE_SMOKE_WHISPER_CPP_BIN: ${{ vars.AWESOME_CAPTURE_SMOKE_WHISPER_CPP_BIN }}
+      AWESOME_CAPTURE_SMOKE_WHISPER_CPP_FALLBACK_BIN: ${{ vars.AWESOME_CAPTURE_SMOKE_WHISPER_CPP_FALLBACK_BIN }}
+      AWESOME_CAPTURE_SMOKE_FASTER_MODEL: ${{ vars.AWESOME_CAPTURE_SMOKE_FASTER_MODEL }}
+      AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL: ${{ vars.AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL }}
+      AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER: ${{ vars.AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER }}
+      AWESOME_CAPTURE_SMOKE_LONG_MEDIA: ${{ vars.AWESOME_CAPTURE_SMOKE_LONG_MEDIA }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Run preregistered local ASR smoke
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+        run: |
+          install -d -m 700 "$RECEIPT_DIR"
+          python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-pass --require-current-digest
+
+      - name: Upload sanitized receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  local-mlx-asr:
+    if: ${{ inputs.case == 'mlx-whisper-local' }}
+    runs-on:
+      - self-hosted
+      - awesome-capture-smoke
+      - macos
+      - arm64
+    timeout-minutes: 120
+    env:
+      SMOKE_CASE: ${{ inputs.case }}
+      AWESOME_CAPTURE_SMOKE_MEDIA: ${{ vars.AWESOME_CAPTURE_SMOKE_MEDIA }}
+      AWESOME_CAPTURE_SMOKE_MLX_MODEL: ${{ vars.AWESOME_CAPTURE_SMOKE_MLX_MODEL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Run preregistered local MLX smoke
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+        run: |
+          install -d -m 700 "$RECEIPT_DIR"
+          python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-pass --require-current-digest
+
+      - name: Upload sanitized receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30

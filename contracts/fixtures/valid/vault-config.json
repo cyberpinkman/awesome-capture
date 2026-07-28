@@ -1,0 +1,26 @@
+{
+  "schema_version": "awesome-capture.vault-config/v1",
+  "name": "My Knowledge Base",
+  "profile": "general",
+  "language": "zh-CN",
+  "folders": [
+    "00 Inbox",
+    "10 Projects",
+    "20 Areas",
+    "30 Resources",
+    "40 Archive",
+    "90 Sources",
+    "99 Attachments",
+    "_Templates"
+  ],
+  "inbox_folder": "00 Inbox",
+  "sources_folder": "90 Sources",
+  "attachments_folder": "99 Attachments",
+  "templates_folder": "_Templates",
+  "link_style": "wikilink",
+  "daily_notes": {
+    "enabled": false,
+    "folder": "Daily",
+    "format": "YYYY-MM-DD"
+  }
+}

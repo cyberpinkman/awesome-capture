@@ -1,0 +1,36 @@
+{
+  "schema_version": "awesome-capture.ingest-receipt/v1",
+  "created_at": "2026-07-27T00:00:00Z",
+  "ingest_id": "4ecf36665d17211451e1ddc744747eda2707a3a0a380f78908e60075f057974e",
+  "transcript_schema": "awesome-capture.artifact/v2",
+  "transcript_artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "transcript_semantic_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "source_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "draft_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "request_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "title": "示例",
+  "knowledge_note": "30 Resources/example.md",
+  "source_note": "90 Sources/example-transcript.md",
+  "initial_files": [
+    {
+      "path": "30 Resources/example.md",
+      "bytes": 100,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "identity_marker": "awesome_capture_id: 4ecf36665d17211451e1ddc744747eda2707a3a0a380f78908e60075f057974e"
+    },
+    {
+      "path": "90 Sources/example-transcript.md",
+      "bytes": 100,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "identity_marker": "awesome_capture_id: 4ecf36665d17211451e1ddc744747eda2707a3a0a380f78908e60075f057974e"
+    }
+  ],
+  "link_style": "markdown",
+  "segment_count": 1,
+  "source_media_verification": "not_checked",
+  "producer": {
+    "skill": "ingest-knowledge",
+    "contract_digest": "647ca3a9d65d2b11af4e6a4cbe65eabf7f40c778616de84f2ef07b5ce1359001"
+  }
+}

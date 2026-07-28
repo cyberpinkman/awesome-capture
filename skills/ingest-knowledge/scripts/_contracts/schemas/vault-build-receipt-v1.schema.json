@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/vault-build-receipt-v1.schema.json",
+  "title": "Awesome Capture vault build receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "created_at",
+    "config_schema",
+    "config_sha256",
+    "layout_version",
+    "link_style",
+    "vault_id",
+    "plan_sha256",
+    "managed_directories",
+    "managed_files",
+    "producer"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.vault-build-receipt/v1"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "config_schema": {"const": "awesome-capture.vault-config/v1"},
+    "config_sha256": {"$ref": "#/$defs/sha256"},
+    "layout_version": {"const": "awesome-capture.vault-layout/v1"},
+    "link_style": {"enum": ["wikilink", "markdown"]},
+    "vault_id": {"$ref": "#/$defs/sha256"},
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "managed_directories": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 10000,
+      "items": {"$ref": "#/$defs/relative_path"}
+    },
+    "managed_files": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/managed_file"}
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill", "contract_digest"],
+      "properties": {
+        "skill": {"const": "build-obsidian-vault"},
+        "contract_digest": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*(?:^|/)\\.\\.?$)[^\\\\\\u0000]+$"
+    },
+    "managed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "mode"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "mode": {"enum": ["0644", "0600"]}
+      }
+    }
+  }
+}

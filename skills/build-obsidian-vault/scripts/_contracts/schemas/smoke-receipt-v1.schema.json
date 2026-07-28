@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/smoke-receipt-v1.schema.json",
+  "title": "Awesome Capture sanitized smoke receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "created_at",
+    "outcome",
+    "commit_sha",
+    "implementation_digest",
+    "environment",
+    "tools",
+    "source",
+    "engine",
+    "artifacts",
+    "assertions",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.smoke-receipt/v1"},
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "outcome": {"enum": ["pass", "fail"]},
+    "commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+    },
+    "implementation_digest": {"$ref": "#/$defs/sha256"},
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "python"],
+      "properties": {
+        "os": {"enum": ["linux", "macos"]},
+        "arch": {"type": "string", "minLength": 1, "maxLength": 64},
+        "python": {
+          "type": "string",
+          "pattern": "^3\\.(?:11|12|13|14)(?:\\.[0-9]+)?$"
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+():-]*$"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "fingerprint", "auth_mode", "fallback"],
+      "properties": {
+        "platform": {
+          "enum": ["douyin", "tiktok", "bilibili", "youtube", "twitter", "local"]
+        },
+        "fingerprint": {"$ref": "#/$defs/sha256"},
+        "auth_mode": {
+          "enum": [
+            "anonymous",
+            "user_cookie_file",
+            "user_browser_cookie",
+            "ephemeral_browser",
+            "not-applicable"
+          ]
+        },
+        "fallback": {"type": ["string", "null"], "maxLength": 256}
+      }
+    },
+    "engine": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "identity_sha256",
+            "model_sha256",
+            "adapter_sha256"
+          ],
+          "properties": {
+            "name": {
+              "enum": [
+                "sidecar-subtitle",
+                "whisper-cpp",
+                "faster-whisper",
+                "mlx-whisper",
+                "external"
+              ]
+            },
+            "identity_sha256": {"$ref": "#/$defs/sha256"},
+            "model_sha256": {
+              "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+            },
+            "adapter_sha256": {
+              "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+            }
+          }
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "sha256"],
+        "properties": {
+          "type": {
+            "enum": [
+              "video-artifact",
+              "transcript-artifact",
+              "vault-build-receipt",
+              "ingest-receipt"
+            ]
+          },
+          "sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "passed"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[a-z0-9][a-z0-9._+-]*$"
+          },
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "string",
+        "maxLength": 256,
+        "pattern": "^[a-z0-9][a-z0-9._+-]*$"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-capture.local/contracts/transaction-v1.schema.json",
+  "title": "Awesome Capture crash-recovery transaction v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "transaction_id",
+    "kind",
+    "status",
+    "created_at",
+    "job_id",
+    "root",
+    "staging_root",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": {"const": "awesome-capture.transaction/v1"},
+    "transaction_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "kind": {
+      "enum": ["download", "transcription", "vault-build", "ingest"]
+    },
+    "status": {
+      "enum": ["preparing", "publishing", "recovery_required", "complete"]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "job_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "root": {"$ref": "#/$defs/absolute_path"},
+    "staging_root": {"$ref": "#/$defs/absolute_path"},
+    "steps": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "operation",
+          "source",
+          "destination",
+          "bytes",
+          "sha256",
+          "status"
+        ],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0},
+          "operation": {"enum": ["publish-file", "publish-directory", "publish-receipt"]},
+          "source": {"$ref": "#/$defs/relative_path"},
+          "destination": {"$ref": "#/$defs/relative_path"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "status": {"enum": ["pending", "published"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "absolute_path": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 4096,
+      "pattern": "^/"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*(?:^|/)\\.\\.?$)[^\\\\\\u0000]+$"
+    }
+  }
+}
