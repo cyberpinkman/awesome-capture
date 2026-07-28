@@ -63,7 +63,8 @@ jobs:
         env:
           COVERAGE_FILE: ${{ runner.temp }}/.coverage
         run: |
-          python -m coverage run --branch tools/run_tests.py --fail-on-skip
+          python -m coverage run --branch tools/run_tests.py \
+            --fail-on-skip --github-annotations
           python -m coverage report --show-missing
           python -m coverage xml -o "$RUNNER_TEMP/coverage.xml"
 
@@ -122,7 +123,8 @@ jobs:
           COVERAGE_FILE: ${{ runner.temp }}/.coverage
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python -m coverage run --branch tools/run_tests.py --fail-on-skip
+          python -m coverage run --branch tools/run_tests.py \
+            --fail-on-skip --github-annotations
           python -m coverage report --show-missing
           python -m coverage xml -o "$RUNNER_TEMP/coverage.xml"
 

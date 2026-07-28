@@ -7,6 +7,7 @@ import argparse
 import sys
 import unittest
 from pathlib import Path
+from typing import TextIO
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,8 +15,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-directory", default="tests")
     parser.add_argument("--pattern", default="test*.py")
     parser.add_argument("--fail-on-skip", action="store_true")
+    parser.add_argument("--github-annotations", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     return parser
+
+
+def _annotation_escape(value: str) -> str:
+    return (
+        value.replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+        .replace(":", "%3A")
+        .replace(",", "%2C")
+    )
+
+
+def emit_github_annotations(
+    result: unittest.TestResult,
+    *,
+    fail_on_skip: bool,
+    stream: TextIO = sys.stderr,
+) -> None:
+    groups = (
+        ("Unit test failure", result.failures),
+        ("Unit test error", result.errors),
+        (
+            "Forbidden skipped test",
+            result.skipped if fail_on_skip else (),
+        ),
+        ("Unexpected test success", result.unexpectedSuccesses),
+    )
+    for title, entries in groups:
+        for entry in entries:
+            test = entry[0] if isinstance(entry, tuple) else entry
+            identifier = test.id()
+            print(
+                f"::error title={_annotation_escape(title)}::"
+                f"{_annotation_escape(identifier)}",
+                file=stream,
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     result = runner.run(suite)
+    if args.github_annotations:
+        emit_github_annotations(
+            result,
+            fail_on_skip=args.fail_on_skip,
+        )
     skipped = len(result.skipped)
     unexpected = len(result.unexpectedSuccesses)
     if args.fail_on_skip and skipped:

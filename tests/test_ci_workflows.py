@@ -1,13 +1,38 @@
 from __future__ import annotations
 
+import io
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools import run_tests  # noqa: E402
 
 
 class CiWorkflowTests(unittest.TestCase):
+    def test_github_annotations_expose_only_failed_test_identity(self) -> None:
+        class SyntheticFailure(unittest.TestCase):
+            def runTest(self) -> None:
+                pass
+
+        test = SyntheticFailure()
+        result = unittest.TestResult()
+        result.failures.append((test, "PRIVATE TRACEBACK"))
+        stream = io.StringIO()
+
+        run_tests.emit_github_annotations(
+            result,
+            fail_on_skip=True,
+            stream=stream,
+        )
+
+        annotation = stream.getvalue()
+        self.assertIn("::error title=Unit test failure::", annotation)
+        self.assertIn(test.id(), annotation)
+        self.assertNotIn("PRIVATE TRACEBACK", annotation)
+
     def test_test_jobs_install_media_tools_before_preflight(self) -> None:
         workflow = (ROOT / ".github/workflows/tests.yml").read_text(
             encoding="utf-8"
@@ -28,6 +53,7 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertIn(macos_install, macos)
         self.assertIn('HOMEBREW_NO_AUTO_UPDATE: "1"', macos)
         self.assertLess(macos.index(macos_install), macos.index(preflight))
+        self.assertEqual(workflow.count("--github-annotations"), 2)
 
     def test_public_smoke_installs_media_tools_before_preflight(self) -> None:
         workflow = (ROOT / ".github/workflows/smoke.yml").read_text(
