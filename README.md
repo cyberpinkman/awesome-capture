@@ -1,6 +1,29 @@
 # Awesome Capture
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/github/actions/workflow/status/cyberpinkman/awesome-capture/tests.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=tests)](https://github.com/cyberpinkman/awesome-capture/actions/workflows/tests.yml)
+
+**支持的视频平台**
+
+[![Douyin](https://img.shields.io/badge/Douyin-000000?style=flat-square&logo=tiktok&logoColor=white)](skills/download-video/SKILL.md)
+[![TikTok](https://img.shields.io/badge/TikTok-000000?style=flat-square&logo=tiktok&logoColor=white)](skills/download-video/SKILL.md)
+[![Bilibili](https://img.shields.io/badge/Bilibili-00A1D6?style=flat-square&logo=bilibili&logoColor=white)](skills/download-video/SKILL.md)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white)](skills/download-video/SKILL.md)
+[![X / Twitter](https://img.shields.io/badge/X%20%2F%20Twitter-000000?style=flat-square&logo=x&logoColor=white)](skills/download-video/SKILL.md)
+
+**运行环境与核心本地工具**
+
+[![Python](https://img.shields.io/badge/Python-3.11--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](#运行依赖)
+[![macOS](https://img.shields.io/badge/macOS-POSIX-000000?style=flat-square&logo=macos&logoColor=white)](#运行依赖)
+[![Linux](https://img.shields.io/badge/Linux-POSIX-FCC624?style=flat-square&logo=linux&logoColor=black)](#运行依赖)
+[![yt-dlp](https://img.shields.io/badge/yt--dlp-download-333333?style=flat-square&logo=github&logoColor=white)](https://github.com/yt-dlp/yt-dlp)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-media-007808?style=flat-square&logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
+[![whisper.cpp](https://img.shields.io/badge/whisper.cpp-ASR-00599C?style=flat-square&logo=cplusplus&logoColor=white)](https://github.com/ggml-org/whisper.cpp)
+[![faster-whisper](https://img.shields.io/badge/faster--whisper-ASR-3776AB?style=flat-square&logo=python&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
+[![MLX Whisper](https://img.shields.io/badge/MLX%20Whisper-ASR-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
+[![Obsidian](https://img.shields.io/badge/Obsidian-vault-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](https://obsidian.md/)
+
+徽章表示当前支持范围或可选的本地集成，不代表本仓库捆绑第三方二进制、模型或平台服务。
 
 一组面向本地 AI Agent 的模块化信息捕获 skills：下载公开视频、转写音视频、把内容结构化写入 Obsidian，以及按用户习惯搭建 Obsidian 知识库。
 
