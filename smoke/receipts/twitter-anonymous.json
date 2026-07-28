@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "sha256": "876bb92de0612d879ad919647790f18a899ba54f2134c386e12e5f33dae0148a",
+      "type": "video-artifact"
+    }
+  ],
+  "assertions": [
+    {
+      "name": "registered-source-detected",
+      "passed": true
+    },
+    {
+      "name": "registered-platform-matches",
+      "passed": true
+    },
+    {
+      "name": "download-command-succeeded",
+      "passed": true
+    },
+    {
+      "name": "video-artifact-v2-valid",
+      "passed": true
+    },
+    {
+      "name": "video-media-reverified",
+      "passed": true
+    },
+    {
+      "name": "anonymous-route-observed",
+      "passed": true
+    },
+    {
+      "name": "required-tools-observed",
+      "passed": true
+    }
+  ],
+  "case_id": "twitter-anonymous",
+  "commit_sha": "13f6ba1e8fadba54ac59cb89fe356c0f2e441b5e",
+  "created_at": "2026-07-28T13:23:41+00:00",
+  "engine": null,
+  "environment": {
+    "arch": "arm64",
+    "os": "macos",
+    "python": "3.14.6"
+  },
+  "implementation_digest": "a8ffd6e7eddef7f89e847336e5bc669a9c93b7f51ec35d7f85e1ba32a096ecaf",
+  "outcome": "pass",
+  "schema_version": "awesome-capture.smoke-receipt/v1",
+  "source": {
+    "auth_mode": "anonymous",
+    "fallback": "none",
+    "fingerprint": "4a4b4651e5e76af4ee5c44943c81620a87baf7c0f77cee169ff9ade8a0daa25e",
+    "platform": "twitter"
+  },
+  "tools": [
+    {
+      "name": "python",
+      "version": "3.14.6"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "ffmpeg version 8.1 Copyright (c) 2000-2026 the FFmpeg developers"
+    },
+    {
+      "name": "ffprobe",
+      "version": "ffprobe version 8.1 Copyright (c) 2007-2026 the FFmpeg developers"
+    },
+    {
+      "name": "yt-dlp",
+      "version": "2026.07.04"
+    }
+  ],
+  "warnings": []
+}
