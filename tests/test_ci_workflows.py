@@ -59,10 +59,11 @@ class CiWorkflowTests(unittest.TestCase):
         preflight = "- name: Verify required POSIX media tools"
 
         self.assertIn("max-parallel: 2", linux)
-        self.assertIn("timeout-minutes: 7", linux)
+        self.assertIn("timeout-minutes: 13", linux)
         self.assertIn("for attempt in 1 2", linux)
         self.assertIn("timeout --kill-after=10s 45s", linux)
-        self.assertIn("timeout --kill-after=10s 120s", linux)
+        self.assertIn("timeout --kill-after=10s 300s", linux)
+        self.assertNotIn("timeout --kill-after=10s 120s", linux)
         self.assertIn("Acquire::Retries=1", linux)
         self.assertIn("Acquire::http::Timeout=15", linux)
         self.assertIn("Acquire::https::Timeout=15", linux)
@@ -231,10 +232,11 @@ class CiWorkflowTests(unittest.TestCase):
         install = "install --yes --no-install-recommends ffmpeg"
         preflight = "- name: Verify tools without installing credentials"
 
-        self.assertIn("timeout-minutes: 7", public_download)
+        self.assertIn("timeout-minutes: 13", public_download)
         self.assertIn("for attempt in 1 2", public_download)
         self.assertIn("timeout --kill-after=10s 45s", public_download)
-        self.assertIn("timeout --kill-after=10s 120s", public_download)
+        self.assertIn("timeout --kill-after=10s 300s", public_download)
+        self.assertNotIn("timeout --kill-after=10s 120s", public_download)
         self.assertIn("Acquire::Retries=1", public_download)
         self.assertIn("Dpkg::Lock::Timeout=30", public_download)
         self.assertIn("dpkg --configure -a", public_download)

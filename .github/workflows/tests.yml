@@ -43,7 +43,7 @@ jobs:
           -r requirements-ci.lock
 
       - name: Install required POSIX media tools
-        timeout-minutes: 7
+        timeout-minutes: 13
         run: |
           for attempt in 1 2; do
             echo "Installing ffmpeg (attempt ${attempt}/2)"
@@ -53,7 +53,7 @@ jobs:
                 -o Acquire::http::Timeout=15 \
                 -o Acquire::https::Timeout=15 \
                 update &&
-              sudo timeout --kill-after=10s 120s \
+              sudo timeout --kill-after=10s 300s \
               apt-get \
                 -o Acquire::Retries=1 \
                 -o Acquire::http::Timeout=15 \
