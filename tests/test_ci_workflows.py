@@ -48,18 +48,22 @@ class CiWorkflowTests(unittest.TestCase):
         )
         linux, macos = workflow.split("  macos-posix:", 1)
 
-        linux_install = (
-            "sudo apt-get install --yes --no-install-recommends ffmpeg"
-        )
-        linux_update = "sudo apt-get update"
+        linux_update = "            update\n"
+        linux_install = "install --yes --no-install-recommends ffmpeg"
         macos_install = "brew install ffmpeg"
         preflight = "- name: Verify required POSIX media tools"
 
+        self.assertIn("timeout-minutes: 5", linux)
+        self.assertIn("Acquire::Retries=3", linux)
+        self.assertIn("Acquire::http::Timeout=30", linux)
+        self.assertIn("Acquire::https::Timeout=30", linux)
+        self.assertIn("Dpkg::Lock::Timeout=60", linux)
         self.assertIn(linux_update, linux)
         self.assertIn(linux_install, linux)
         self.assertLess(linux.index(linux_update), linux.index(linux_install))
         self.assertLess(linux.index(linux_install), linux.index(preflight))
         self.assertIn(macos_install, macos)
+        self.assertIn("timeout-minutes: 15", macos)
         self.assertIn('HOMEBREW_NO_AUTO_UPDATE: "1"', macos)
         self.assertLess(macos.index(macos_install), macos.index(preflight))
         self.assertEqual(workflow.count("--github-annotations"), 2)
@@ -87,10 +91,13 @@ class CiWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
         public_download, _ = workflow.split("  local-posix-asr:", 1)
-        update = "sudo apt-get update"
-        install = "sudo apt-get install --yes --no-install-recommends ffmpeg"
+        update = "            update\n"
+        install = "install --yes --no-install-recommends ffmpeg"
         preflight = "- name: Verify tools without installing credentials"
 
+        self.assertIn("timeout-minutes: 5", public_download)
+        self.assertIn("Acquire::Retries=3", public_download)
+        self.assertIn("Dpkg::Lock::Timeout=60", public_download)
         self.assertIn(update, public_download)
         self.assertIn(install, public_download)
         self.assertLess(
