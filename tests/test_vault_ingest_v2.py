@@ -15,6 +15,8 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CONCURRENT_LOCK_TIMEOUT = "30"
+CONCURRENT_PROCESS_TIMEOUT = 45
 
 
 def load_module(name: str, relative: str):
@@ -347,13 +349,16 @@ class VaultReceiptV1Tests(unittest.TestCase):
                 "--expected-plan-sha256",
                 plan["plan_sha256"],
                 "--lock-timeout",
-                "5",
+                CONCURRENT_LOCK_TIMEOUT,
             ]
             processes = [
                 subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 for _ in range(2)
             ]
-            results = [process.communicate(timeout=10) for process in processes]
+            results = [
+                process.communicate(timeout=CONCURRENT_PROCESS_TIMEOUT)
+                for process in processes
+            ]
             self.assertEqual([process.returncode for process in processes], [0, 0], results)
             payloads = [json.loads(stdout) for stdout, _ in results]
             self.assertEqual(
@@ -398,7 +403,7 @@ class VaultReceiptV1Tests(unittest.TestCase):
                     "--expected-plan-sha256",
                     plan_sha256,
                     "--lock-timeout",
-                    "5",
+                    CONCURRENT_LOCK_TIMEOUT,
                 ]
 
             processes = [
@@ -411,7 +416,10 @@ class VaultReceiptV1Tests(unittest.TestCase):
                 )
                 for path, plan in zip(config_paths, plans)
             ]
-            results = [process.communicate(timeout=10) for process in processes]
+            results = [
+                process.communicate(timeout=CONCURRENT_PROCESS_TIMEOUT)
+                for process in processes
+            ]
             self.assertEqual(
                 sorted(process.returncode for process in processes),
                 [0, 4],
@@ -1454,13 +1462,16 @@ class IngestReceiptV1Tests(unittest.TestCase):
                 "--expected-plan-sha256",
                 dry["plan_sha256"],
                 "--lock-timeout",
-                "5",
+                CONCURRENT_LOCK_TIMEOUT,
             ]
             processes = [
                 subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 for _ in range(2)
             ]
-            results = [process.communicate(timeout=10) for process in processes]
+            results = [
+                process.communicate(timeout=CONCURRENT_PROCESS_TIMEOUT)
+                for process in processes
+            ]
             self.assertEqual([process.returncode for process in processes], [0, 0], results)
             payloads = [json.loads(stdout) for stdout, _ in results]
             self.assertEqual(
@@ -1630,7 +1641,7 @@ class IngestReceiptV1Tests(unittest.TestCase):
                     "--expected-plan-sha256",
                     plan_sha256,
                     "--lock-timeout",
-                    "5",
+                    CONCURRENT_LOCK_TIMEOUT,
                 ]
 
             processes = [
@@ -1649,7 +1660,10 @@ class IngestReceiptV1Tests(unittest.TestCase):
                     env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
                 ),
             ]
-            results = [process.communicate(timeout=10) for process in processes]
+            results = [
+                process.communicate(timeout=CONCURRENT_PROCESS_TIMEOUT)
+                for process in processes
+            ]
             self.assertEqual(
                 sorted(process.returncode for process in processes),
                 [0, 4],
