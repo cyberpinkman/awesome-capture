@@ -48,6 +48,9 @@
   `EXISTING_VAULT_REQUIRES_OPT_IN`。
 - Release 门禁会拒绝零份或仅覆盖部分预登记 case 的 smoke 证据，避免把普通
   PR 的“允许无真实 smoke”规则误用于正式发布。
+- 下载 smoke 按平台实际路由登记：YouTube/Bilibili/X 匿名、Douyin 隔离
+  临时浏览器、TikTok/X gallery fallback；fallback case 同时验证匿名首试
+  和受控回退，不要求已被平台强制回退的路径伪造匿名成功。
 - whisper.cpp GPU 失败与 CPU 回退相互隔离；GPU 或 CPU 崩溃不会被记录为
   空转写。
 

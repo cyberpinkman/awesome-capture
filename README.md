@@ -395,6 +395,11 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
   下载 case 使用公开样本；ASR case 只在受保护 runner 上使用预置本地模型，
   不在工作流中下载模型或接收任意 URL、Cookie 和浏览器路径。
 
+当前下载发布证据覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
+匿名下载，Douyin 隔离临时浏览器，以及 TikTok/X 的 gallery fallback。
+fallback case 本身先执行匿名尝试，再验证实际回退路径；不把当前必须回退的
+平台重复登记为无法满足的“匿名直连”发布门槛。
+
 离线测试证明契约、安全边界、故障恢复和幂等行为，不证明外部平台或具体
 ASR/硬件组合当前可用。对外发布受影响的平台或引擎时，应生成
 `outcome: pass` 且匹配当前 `implementation_digest` 的正式脱敏 smoke

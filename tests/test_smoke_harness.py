@@ -321,8 +321,36 @@ class SmokeHarnessTests(unittest.TestCase):
 
     def test_cases_are_alias_only_and_unknown_alias_is_rejected(self):
         cases = run_smoke.load_cases()
-        self.assertEqual(len(cases), 15)
+        self.assertEqual(len(cases), 13)
         self.assertEqual(len({case["case_id"] for case in cases}), len(cases))
+        download_cases = {
+            case["case_id"]: case
+            for case in cases
+            if case["suite"] == "download"
+        }
+        self.assertEqual(
+            set(download_cases),
+            {
+                "bilibili-anonymous",
+                "youtube-anonymous",
+                "twitter-anonymous",
+                "douyin-ephemeral-browser",
+                "tiktok-gallery-fallback",
+                "twitter-gallery-fallback",
+            },
+        )
+        self.assertEqual(
+            {case["platform"] for case in download_cases.values()},
+            {"bilibili", "youtube", "twitter", "douyin", "tiktok"},
+        )
+        self.assertEqual(
+            download_cases["douyin-ephemeral-browser"]["expectation"],
+            "ephemeral_browser",
+        )
+        self.assertEqual(
+            download_cases["tiktok-gallery-fallback"]["expectation"],
+            "gallery-dl",
+        )
         for case in cases:
             self.assertNotIn("url", case)
             self.assertNotIn("path", case)
@@ -751,10 +779,10 @@ class SmokeHarnessTests(unittest.TestCase):
             self.assertFalse(assertions["required-tools-observed"])
 
     def test_anonymous_case_records_unexpected_fallback_as_failed_assertion(self):
-        case = run_smoke.select_case("tiktok-anonymous")
+        case = run_smoke.select_case("twitter-anonymous")
         artifact = {
             "source": {
-                "platform": "tiktok",
+                "platform": "twitter",
                 "fingerprint": "a" * 64,
             },
             "acquisition": {
@@ -771,7 +799,7 @@ class SmokeHarnessTests(unittest.TestCase):
             mock.patch.object(
                 run_smoke,
                 "_detect_download_source",
-                return_value=("tiktok", "a" * 64, True),
+                return_value=("twitter", "a" * 64, True),
             ),
             mock.patch.object(
                 run_smoke,
@@ -799,7 +827,7 @@ class SmokeHarnessTests(unittest.TestCase):
         ):
             details = run_smoke._download_case(
                 case,
-                "https://www.tiktok.com/@public/video/1",
+                "https://x.com/public/status/1",
                 Path("/private/tmp/unused-smoke-work"),
                 runner=mock.Mock(),
             )

@@ -8,8 +8,6 @@ on:
         required: true
         type: choice
         options:
-          - douyin-anonymous
-          - tiktok-anonymous
           - bilibili-anonymous
           - youtube-anonymous
           - twitter-anonymous
@@ -32,13 +30,11 @@ env:
 
 jobs:
   public-download:
-    if: ${{ contains(fromJSON('["douyin-anonymous","tiktok-anonymous","bilibili-anonymous","youtube-anonymous","twitter-anonymous","douyin-ephemeral-browser","tiktok-gallery-fallback","twitter-gallery-fallback"]'), inputs.case) }}
+    if: ${{ contains(fromJSON('["bilibili-anonymous","youtube-anonymous","twitter-anonymous","douyin-ephemeral-browser","tiktok-gallery-fallback","twitter-gallery-fallback"]'), inputs.case) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       SMOKE_CASE: ${{ inputs.case }}
-      AWESOME_CAPTURE_SMOKE_DOUYIN_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_DOUYIN_URL }}
-      AWESOME_CAPTURE_SMOKE_TIKTOK_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TIKTOK_URL }}
       AWESOME_CAPTURE_SMOKE_BILIBILI_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_BILIBILI_URL }}
       AWESOME_CAPTURE_SMOKE_YOUTUBE_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_YOUTUBE_URL }}
       AWESOME_CAPTURE_SMOKE_TWITTER_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_TWITTER_URL }}

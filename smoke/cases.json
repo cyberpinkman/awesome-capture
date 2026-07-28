@@ -2,20 +2,6 @@
   "schema_version": "awesome-capture.smoke-cases/v1",
   "cases": [
     {
-      "case_id": "douyin-anonymous",
-      "suite": "download",
-      "platform": "douyin",
-      "source_env": "AWESOME_CAPTURE_SMOKE_DOUYIN_URL",
-      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
-    },
-    {
-      "case_id": "tiktok-anonymous",
-      "suite": "download",
-      "platform": "tiktok",
-      "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_URL",
-      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
-    },
-    {
       "case_id": "bilibili-anonymous",
       "suite": "download",
       "platform": "bilibili",
