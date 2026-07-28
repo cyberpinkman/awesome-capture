@@ -79,6 +79,9 @@ jobs:
       - name: Verify generated contracts
         run: python tools/sync_vendored.py --check
 
+      - name: Verify release metadata
+        run: python tools/release.py check
+
       - name: Validate any checked-in smoke receipts
         run: python tools/smoke_receipts.py validate-existing
 
@@ -138,6 +141,9 @@ jobs:
 
       - name: Verify generated contracts
         run: python tools/sync_vendored.py --check
+
+      - name: Verify release metadata
+        run: python tools/release.py check
 
       - name: Validate any checked-in smoke receipts
         run: python tools/smoke_receipts.py validate-existing

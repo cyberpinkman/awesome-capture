@@ -1,0 +1,339 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact stable VERSION to publish (for example, 1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: awesome-capture-release
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  REQUESTED_VERSION: ${{ inputs.version }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Require a main branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error title=Invalid release ref::Releases must be dispatched from main."
+            exit 1
+          fi
+
+      - name: Check out the exact release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Validate release metadata and generate notes
+        env:
+          RELEASE_NOTES: ${{ runner.temp }}/awesome-capture-release-notes.md
+        run: |
+          set -euo pipefail
+          if ! [[ "$REQUESTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error title=Invalid release version::The release workflow only publishes stable X.Y.Z versions."
+            exit 1
+          fi
+          python tools/release.py check-release \
+            --requested-version "$REQUESTED_VERSION"
+          python tools/release.py notes --output "$RELEASE_NOTES"
+
+      - name: Run local release gates
+        run: |
+          set -euo pipefail
+          python tools/sync_vendored.py --check
+          python tools/smoke_receipts.py validate-existing \
+            --require-pass \
+            --require-current-digest
+          python tools/check_repository_hygiene.py
+          git diff --check
+          repository_status="$(git status --porcelain)"
+          if [ -n "$repository_status" ]; then
+            echo "::error title=Dirty release tree::Release gates changed the checkout."
+            exit 1
+          fi
+
+      - name: Verify main and exact-SHA CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v gh
+
+          main_sha="$(
+            gh api \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+              --jq '.object.sha'
+          )"
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo "::error title=Main moved::The dispatched commit is no longer main HEAD."
+            exit 1
+          fi
+
+          ci_run_id="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs" \
+              -f branch=main \
+              -f event=push \
+              -f status=success \
+              -f head_sha="$GITHUB_SHA" \
+              -F per_page=100 \
+              --jq ".workflow_runs
+                | map(select(
+                    .head_sha == \"$GITHUB_SHA\"
+                    and .event == \"push\"
+                    and .conclusion == \"success\"
+                  ))
+                | first
+                | .id // empty"
+          )"
+          if [ -z "$ci_run_id" ]; then
+            echo "::error title=Missing release CI::The exact main commit has no successful tests.yml push run."
+            exit 1
+          fi
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Require a main branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error title=Invalid release ref::Releases must be dispatched from main."
+            exit 1
+          fi
+
+      - name: Check out the exact release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Revalidate metadata and generate release notes
+        env:
+          RELEASE_NOTES: ${{ runner.temp }}/awesome-capture-release-notes.md
+        run: |
+          set -euo pipefail
+          if ! [[ "$REQUESTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error title=Invalid release version::The release workflow only publishes stable X.Y.Z versions."
+            exit 1
+          fi
+          python tools/release.py check-release \
+            --requested-version "$REQUESTED_VERSION"
+          python tools/release.py notes --output "$RELEASE_NOTES"
+
+      - name: Preflight the remote tag and release
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ runner.temp }}/awesome-capture-release-notes.md
+        run: |
+          set -euo pipefail
+          command -v gh
+          tag="v${REQUESTED_VERSION}"
+
+          tag_record="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+              --jq ".[]
+                | select(.ref == \"refs/tags/$tag\")
+                | [.object.type, .object.sha]
+                | @tsv"
+          )"
+          if [[ "$tag_record" == *$'\n'* ]]; then
+            echo "::error title=Release conflict::The release tag is ambiguous."
+            exit 1
+          fi
+
+          tag_exists=false
+          if [ -n "$tag_record" ]; then
+            read -r tag_type tag_sha <<< "$tag_record"
+            if [ "$tag_type" != "commit" ] || [ "$tag_sha" != "$GITHUB_SHA" ]; then
+              echo "::error title=Release conflict::The release tag is not the exact release commit."
+              exit 1
+            fi
+            tag_exists=true
+          fi
+
+          release_ids="$(
+            gh api --paginate --method GET \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/releases" \
+              -F per_page=100 \
+              --jq ".[]
+                | select(.tag_name == \"$tag\")
+                | .id"
+          )"
+          if [[ "$release_ids" == *$'\n'* ]]; then
+            echo "::error title=Release conflict::More than one release uses the tag."
+            exit 1
+          fi
+
+          release_exists=false
+          if [ -n "$release_ids" ]; then
+            release_exists=true
+            if [ "$tag_exists" != true ]; then
+              echo "::error title=Release conflict::A release exists without its expected tag."
+              exit 1
+            fi
+
+            release_json="$(
+              gh release view "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json body,isDraft,isPrerelease,name,tagName
+            )"
+            if [ "$(jq -r '.tagName' <<< "$release_json")" != "$tag" ] ||
+               [ "$(jq -r '.name' <<< "$release_json")" != "$tag" ] ||
+               [ "$(jq -r '.isDraft' <<< "$release_json")" != "false" ] ||
+               [ "$(jq -r '.isPrerelease' <<< "$release_json")" != "false" ]; then
+              echo "::error title=Release conflict::Existing release metadata does not match."
+              exit 1
+            fi
+            jq -j '.body' <<< "$release_json" > "$RUNNER_TEMP/existing-release-notes.md"
+            if ! cmp -s "$RELEASE_NOTES" "$RUNNER_TEMP/existing-release-notes.md"; then
+              echo "::error title=Release conflict::Existing release notes do not match CHANGELOG.md."
+              exit 1
+            fi
+          fi
+
+          if [ "$release_exists" = true ]; then
+            state=reused
+          elif [ "$tag_exists" = true ]; then
+            state=tag-only
+          else
+            state=new
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ runner.temp }}/awesome-capture-release-notes.md
+          RELEASE_STATE: ${{ steps.preflight.outputs.state }}
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          main_sha="$(
+            gh api \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+              --jq '.object.sha'
+          )"
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo "::error title=Main moved::Main changed after release verification."
+            exit 1
+          fi
+
+          case "$RELEASE_STATE" in
+            reused)
+              echo "The exact release already exists; no mutation was needed."
+              ;;
+            tag-only)
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --verify-tag \
+                --target "$GITHUB_SHA" \
+                --title "$RELEASE_TAG" \
+                --notes-file "$RELEASE_NOTES" \
+                --latest
+              ;;
+            new)
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
+                --title "$RELEASE_TAG" \
+                --notes-file "$RELEASE_NOTES" \
+                --latest
+              ;;
+            *)
+              echo "::error title=Invalid release state::Remote preflight did not produce a known state."
+              exit 1
+              ;;
+          esac
+
+      - name: Verify the published tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ runner.temp }}/awesome-capture-release-notes.md
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          tag_record="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG" \
+              --jq ".[]
+                | select(.ref == \"refs/tags/$RELEASE_TAG\")
+                | [.object.type, .object.sha]
+                | @tsv"
+          )"
+          read -r tag_type tag_sha <<< "$tag_record"
+          if [ "$tag_type" != "commit" ] || [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error title=Release verification failed::Published tag does not resolve to the release commit."
+            exit 1
+          fi
+
+          release_json="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json body,isDraft,isPrerelease,name,tagName,url
+          )"
+          if [ "$(jq -r '.tagName' <<< "$release_json")" != "$RELEASE_TAG" ] ||
+             [ "$(jq -r '.name' <<< "$release_json")" != "$RELEASE_TAG" ] ||
+             [ "$(jq -r '.isDraft' <<< "$release_json")" != "false" ] ||
+             [ "$(jq -r '.isPrerelease' <<< "$release_json")" != "false" ]; then
+            echo "::error title=Release verification failed::Published release metadata does not match."
+            exit 1
+          fi
+          jq -j '.body' <<< "$release_json" > "$RUNNER_TEMP/published-release-notes.md"
+          if ! cmp -s "$RELEASE_NOTES" "$RUNNER_TEMP/published-release-notes.md"; then
+            echo "::error title=Release verification failed::Published notes differ from CHANGELOG.md."
+            exit 1
+          fi
+
+          release_url="$(jq -r '.url' <<< "$release_json")"
+          echo "Published and verified: $release_url" >> "$GITHUB_STEP_SUMMARY"

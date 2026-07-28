@@ -135,6 +135,22 @@ Canonical schemas、stdlib validator、POSIX runtime 和 fixtures 位于根目�
 
 所有命令默认从仓库根目录运行。
 
+### Release metadata
+
+仓库发行版本由根目录 `VERSION` 唯一维护，四个
+`skills/<name>/VERSION` 是 standalone 分发副本；四个 skills 必须锁步发布。
+Git tag 使用 `vX.Y.Z`，版本文件使用 `X.Y.Z`。`main` 是未发布开发分支，
+普通安装应固定到 GitHub Release tag。
+
+仓库 SemVer 不等同于 wire schema 版本、`contract_digest`、
+`runtime_digest`、`implementation_digest` 或 commit SHA。完整边界见
+`VERSIONING.md`；发布流程见 `RELEASING.md`。修改用户可见行为时先更新
+`CHANGELOG.md` 的 `[Unreleased]`，不要把 breaking change 隐藏在 patch 中。
+
+```bash
+python3 tools/release.py check
+```
+
 ### Unified CLI JSON protocol
 
 四个 skill 的 CLI 成功时 stdout 恰好输出一个 JSON object、stderr 为空并退出 0；预期失败时 stdout 为空、stderr 恰好输出一个脱敏 JSON error。统一退出码为：
@@ -249,6 +265,8 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 ### 修改代码
 
 - 目标行为有测试；
+- 版本元数据通过 `python3 tools/release.py check`；面向使用者的变化已写入
+  `CHANGELOG.md` 的 `[Unreleased]`；
 - `python3 tools/sync_vendored.py --check` 通过；
 - `PYTHONDONTWRITEBYTECODE=1 python3 tools/run_tests.py --fail-on-skip` 全部通过且零 skip；
 - 未产生 `__pycache__`、模型、媒体、Cookie 或临时输出；
@@ -300,7 +318,8 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 
 ## 9. Known Tested Baseline
 
-截至 2026-07-27，下列版本与结果是历史可复现基线，不是当前版本的发布证据：
+`v0.1.0`（2026-07-28）是首个统一 SemVer 发行边界。下列工具版本与测试
+结果是该版本准备时的历史可复现基线，不代替当前实现的发布证据：
 
 - 支持 Python 3.11–3.14；CI 覆盖 Ubuntu 3.11–3.14 与 macOS 3.11、3.14，全部使用 no-skip runner；
 - `awesome-capture.artifact/v2` 为当前唯一可接受的媒体 artifact 版本；v1 是明确拒绝的 legacy 输入；

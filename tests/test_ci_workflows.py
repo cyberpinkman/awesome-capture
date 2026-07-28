@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -17,6 +18,10 @@ CHECKOUT = (
 SETUP_PYTHON = (
     "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
     " # v7.0.0"
+)
+PINNED_ACTION = re.compile(
+    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+    r"(?:/[A-Za-z0-9_.-]+)?@[0-9a-f]{40}$"
 )
 
 
@@ -73,15 +78,35 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertLess(macos.index(macos_install), macos.index(preflight))
         self.assertEqual(workflow.count("--github-annotations"), 2)
 
-    def test_official_actions_use_node24_releases_pinned_by_sha(self) -> None:
-        workflows = [
-            path.read_text(encoding="utf-8")
-            for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
-        ]
-        combined = "\n".join(workflows)
+    def test_all_remote_actions_are_pinned_by_sha_with_version_comments(
+        self,
+    ) -> None:
+        workflow_root = ROOT / ".github" / "workflows"
+        workflows = sorted(
+            {
+                *workflow_root.glob("*.yml"),
+                *workflow_root.glob("*.yaml"),
+            }
+        )
+        combined = "\n".join(
+            path.read_text(encoding="utf-8") for path in workflows
+        )
 
-        self.assertEqual(combined.count(CHECKOUT), 5)
-        self.assertEqual(combined.count(SETUP_PYTHON), 5)
+        for path in workflows:
+            workflow = path.read_text(encoding="utf-8")
+            uses_lines = re.findall(
+                r"(?m)^\s*uses:\s*([^#\s]+)(?:\s+#\s*(\S.*))?$",
+                workflow,
+            )
+            for action, comment in uses_lines:
+                if action.startswith("./"):
+                    continue
+                with self.subTest(workflow=path.name, action=action):
+                    self.assertRegex(action, PINNED_ACTION)
+                    self.assertRegex(comment, r"^v[0-9]")
+
+        self.assertIn(CHECKOUT, combined)
+        self.assertIn(SETUP_PYTHON, combined)
         self.assertNotIn(
             "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
             combined,
@@ -90,6 +115,111 @@ class CiWorkflowTests(unittest.TestCase):
             "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
             combined,
         )
+
+    def test_release_workflow_is_manual_fail_closed_and_idempotent(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        trigger = workflow.split("on:", 1)[1].split("permissions:", 1)[0]
+        policy, jobs = workflow.split("jobs:", 1)
+        verify, publish = jobs.split("  publish:", 1)
+
+        self.assertIn("workflow_dispatch:", trigger)
+        self.assertIn("version:", trigger)
+        self.assertNotIn("push:", trigger)
+        self.assertNotIn("pull_request:", trigger)
+        self.assertIn("permissions:\n  contents: read", policy)
+        self.assertNotIn("contents: write", policy)
+        self.assertIn("actions: read", verify)
+        self.assertIn("contents: read", verify)
+        self.assertNotIn("contents: write", verify)
+        self.assertIn("contents: write", publish)
+        self.assertNotIn("actions: write", workflow)
+        self.assertEqual(workflow.count("contents: write"), 1)
+        self.assertIn("group: awesome-capture-release", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertNotIn("continue-on-error:", workflow)
+        self.assertNotIn("always()", workflow)
+
+        self.assertEqual(
+            workflow.count(
+                'if [ "$DISPATCH_REF" != "refs/heads/main" ]; then'
+            ),
+            2,
+        )
+        self.assertEqual(workflow.count("fetch-depth: 0"), 2)
+        self.assertEqual(workflow.count("persist-credentials: false"), 2)
+        self.assertEqual(workflow.count("ref: ${{ github.sha }}"), 2)
+        self.assertEqual(
+            workflow.count(
+                'if ! [[ "$REQUESTED_VERSION" =~ '
+                r"^(0|[1-9][0-9]*)\."
+                r"(0|[1-9][0-9]*)\."
+                r"(0|[1-9][0-9]*)$ ]]; then"
+            ),
+            2,
+        )
+
+        local_gates = (
+            'check-release \\\n            --requested-version "$REQUESTED_VERSION"',
+            'notes --output "$RELEASE_NOTES"',
+            "python tools/sync_vendored.py --check",
+            (
+                "python tools/smoke_receipts.py validate-existing \\\n"
+                "            --require-pass \\\n"
+                "            --require-current-digest"
+            ),
+            "python tools/check_repository_hygiene.py",
+            "git diff --check",
+            "git status --porcelain",
+        )
+        for gate in local_gates:
+            with self.subTest(gate=gate):
+                self.assertIn(gate, workflow)
+
+        self.assertIn(
+            "actions/workflows/tests.yml/runs",
+            workflow,
+        )
+        self.assertIn('.head_sha == \\"$GITHUB_SHA\\"', workflow)
+        self.assertIn("-f head_sha=\"$GITHUB_SHA\"", workflow)
+        self.assertGreaterEqual(
+            workflow.count("git/ref/heads/main"),
+            2,
+        )
+        self.assertEqual(
+            workflow.count("X-GitHub-Api-Version: 2022-11-28"),
+            6,
+        )
+        self.assertIn("state=reused", workflow)
+        self.assertIn("state=tag-only", workflow)
+        self.assertIn("state=new", workflow)
+        self.assertIn(
+            "The release tag is not the exact release commit.",
+            workflow,
+        )
+        self.assertIn(
+            "Existing release notes do not match CHANGELOG.md.",
+            workflow,
+        )
+        self.assertIn('gh release create "$RELEASE_TAG"', workflow)
+        self.assertIn('--target "$GITHUB_SHA"', workflow)
+        self.assertIn('--notes-file "$RELEASE_NOTES"', workflow)
+        self.assertIn("Verify the published tag and release", workflow)
+        self.assertIn(
+            "Published notes differ from CHANGELOG.md.",
+            workflow,
+        )
+
+        token_lines = re.findall(
+            r"(?m)^(\s*)GH_TOKEN:\s*\$\{\{ github\.token \}\}$",
+            workflow,
+        )
+        self.assertEqual(len(token_lines), 4)
+        self.assertTrue(
+            all(indentation == "          " for indentation in token_lines)
+        )
+        self.assertEqual(workflow.count("${{ github.token }}"), 4)
 
     def test_public_smoke_installs_media_tools_before_preflight(self) -> None:
         workflow = (ROOT / ".github/workflows/smoke.yml").read_text(

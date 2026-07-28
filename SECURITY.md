@@ -1,5 +1,13 @@
 # Security Policy
 
+## 支持版本
+
+除具体 release notes 另有说明外，安全修复以
+[最新 GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases/latest)
+为维护目标。`main` 是未发布开发分支，不应作为稳定版本安装。报告问题时请
+同时提供受影响的 release tag；版本兼容与支持规则见
+[`VERSIONING.md`](VERSIONING.md)。
+
 ## 报告安全问题
 
 请不要在公开 Issue 中提交真实 Cookie、Token、签名 URL、私有媒体、个人文件路径或 Obsidian 内容。

@@ -443,6 +443,89 @@ class SmokeHarnessTests(unittest.TestCase):
             receipt["implementation_digest"],
         )
 
+    def test_validate_existing_release_flags_enforce_outcome_and_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = Path(smoke_receipts.__file__).resolve()
+            environment = dict(os.environ)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+
+            passing_dir = root / "passing"
+            passing_dir.mkdir()
+            passing = self.registered_download_receipt()
+            passing["implementation_digest"] = smoke_receipts.implementation_digest()
+            self.write_private_json(passing_dir / "receipt.json", passing)
+            accepted = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate-existing",
+                    "--directory",
+                    str(passing_dir),
+                    "--require-pass",
+                    "--require-current-digest",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(json.loads(accepted.stdout)["receipt_count"], 1)
+
+            failed_dir = root / "failed"
+            failed_dir.mkdir()
+            failed = self.registered_download_receipt()
+            failed["outcome"] = "fail"
+            failed["assertions"][0]["passed"] = False
+            self.write_private_json(failed_dir / "receipt.json", failed)
+            rejected_outcome = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate-existing",
+                    "--directory",
+                    str(failed_dir),
+                    "--require-pass",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(rejected_outcome.returncode, 2)
+            self.assertEqual(rejected_outcome.stdout, "")
+            self.assertEqual(
+                json.loads(rejected_outcome.stderr)["error"]["code"],
+                "SMOKE_FAILED",
+            )
+
+            stale_dir = root / "stale"
+            stale_dir.mkdir()
+            stale = self.registered_download_receipt()
+            stale["implementation_digest"] = "0" * 64
+            self.write_private_json(stale_dir / "receipt.json", stale)
+            rejected_digest = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate-existing",
+                    "--directory",
+                    str(stale_dir),
+                    "--require-current-digest",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(rejected_digest.returncode, 2)
+            self.assertEqual(rejected_digest.stdout, "")
+            self.assertEqual(
+                json.loads(rejected_digest.stderr)["error"]["code"],
+                "STALE_SMOKE_RECEIPT",
+            )
+
     def test_registered_case_platform_and_engine_mismatches_are_rejected(self):
         platform_mismatch = self.registered_download_receipt()
         platform_mismatch["source"]["platform"] = "tiktok"

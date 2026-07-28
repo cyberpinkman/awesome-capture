@@ -1,6 +1,7 @@
 # Awesome Capture
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/cyberpinkman/awesome-capture?display_name=tag&sort=semver&style=flat-square&label=release)](https://github.com/cyberpinkman/awesome-capture/releases/latest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/cyberpinkman/awesome-capture/tests.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=tests)](https://github.com/cyberpinkman/awesome-capture/actions/workflows/tests.yml)
 
 **支持的视频平台**
@@ -29,6 +30,13 @@
 
 > 安全支持范围：macOS / Linux（POSIX），Python 3.11–3.14。
 > 当前能力边界：单个公开视频、本地音视频、本地 Obsidian vault；不支持 DRM、付费、私密内容或登录绕过。
+
+当前稳定版本为 `v0.1.0`。普通使用请固定到
+[GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)；
+`main` 是开发分支，可能包含尚未发布或破坏兼容性的变化。
+
+[更新记录](CHANGELOG.md) · [版本策略](VERSIONING.md) ·
+[发布流程](RELEASING.md) · [安全策略](SECURITY.md)
 
 ## 给本地 Agent 的快速指引
 
@@ -123,12 +131,17 @@ plan → 用户确认 → build → audit
 
 ## 快速安装
 
-### 1. 克隆
+### 1. 获取稳定版
 
 ```bash
-git clone https://github.com/cyberpinkman/awesome-capture.git
+git clone --branch v0.1.0 --depth 1 \
+  https://github.com/cyberpinkman/awesome-capture.git
 cd awesome-capture
 ```
+
+上面的 tag 是可复现安装边界。需要其他版本时，从
+[Releases](https://github.com/cyberpinkman/awesome-capture/releases) 选择并
+替换 `v0.1.0`；不要把浮动的 `main` 当作稳定版本安装。
 
 ### 2. 注册到 Codex
 
@@ -414,11 +427,14 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 .
 ├── .github/workflows/
 │   ├── tests.yml
-│   └── smoke.yml
+│   ├── smoke.yml
+│   └── release.yml
 ├── AGENTS.md
+├── CHANGELOG.md
 ├── contracts/          # canonical schemas、runtime、fixtures 与 manifest
 ├── LICENSE
 ├── README.md
+├── RELEASING.md
 ├── requirements-ci.lock
 ├── SECURITY.md
 ├── smoke/              # 公开 case alias；不存媒体或秘密
@@ -428,8 +444,11 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 │   ├── ingest-knowledge/
 │   └── build-obsidian-vault/
 ├── tests/
+├── VERSION              # 仓库发行版本的唯一源码
+├── VERSIONING.md
 └── tools/
     ├── check_repository_hygiene.py
+    ├── release.py
     ├── run_smoke.py
     ├── run_tests.py
     ├── smoke_receipts.py
@@ -440,6 +459,7 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 
 ```text
 <skill>/
+├── VERSION             # 与根 VERSION 同步的 standalone 版本
 ├── SKILL.md            # Agent 必须完整阅读的规范
 ├── agents/openai.yaml  # UI 元数据
 ├── scripts/            # 确定性实现；含生成的 _contracts/ standalone bundle
@@ -463,9 +483,16 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 
 ## 贡献
 
+面向使用者的变化应先写入
+[`CHANGELOG.md`](CHANGELOG.md) 的 `[Unreleased]`；版本升级规则、breaking
+change 要求和 release/schema/digest 的区别见
+[`VERSIONING.md`](VERSIONING.md)。维护者发布前还应遵循
+[`RELEASING.md`](RELEASING.md)。
+
 提交改动前至少运行：
 
 ```bash
+python3 tools/release.py check
 python3 tools/sync_vendored.py --check
 PYTHONDONTWRITEBYTECODE=1 python3 tools/run_tests.py --fail-on-skip
 PYTHONDONTWRITEBYTECODE=1 python3 tools/check_repository_hygiene.py

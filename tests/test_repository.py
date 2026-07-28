@@ -16,7 +16,16 @@ SKILLS = (
 
 class RepositoryStructureTests(unittest.TestCase):
     def test_public_repository_documents_exist(self):
-        for name in ("README.md", "AGENTS.md", "LICENSE", "SECURITY.md"):
+        for name in (
+            "README.md",
+            "AGENTS.md",
+            "CHANGELOG.md",
+            "LICENSE",
+            "RELEASING.md",
+            "SECURITY.md",
+            "VERSION",
+            "VERSIONING.md",
+        ):
             with self.subTest(name=name):
                 self.assertTrue((ROOT / name).is_file())
         self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))
@@ -33,6 +42,12 @@ class RepositoryStructureTests(unittest.TestCase):
                 self.assertRegex(header, r"(?m)^description:\s*\S.+$")
                 self.assertTrue(
                     (ROOT / "skills" / name / "agents" / "openai.yaml").is_file()
+                )
+                self.assertEqual(
+                    (ROOT / "skills" / name / "VERSION").read_text(
+                        encoding="utf-8"
+                    ),
+                    (ROOT / "VERSION").read_text(encoding="utf-8"),
                 )
 
     def test_agent_guide_routes_every_skill(self):

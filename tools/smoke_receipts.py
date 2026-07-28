@@ -317,6 +317,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--directory",
         default=str(ROOT / "smoke" / "receipts"),
     )
+    existing_parser.add_argument("--require-pass", action="store_true")
+    existing_parser.add_argument("--require-current-digest", action="store_true")
     return parser
 
 
@@ -345,8 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             receipts = [
                 validate_receipt(
                     path,
-                    require_pass=False,
-                    require_current_digest=False,
+                    require_pass=args.require_pass,
+                    require_current_digest=args.require_current_digest,
                 )
                 for path in paths
             ]
