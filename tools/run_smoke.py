@@ -191,13 +191,13 @@ def _sha256_file(path: Path) -> str:
 
 def _safe_version(value: str) -> str:
     first = value.replace("\0", "").splitlines()[0].strip() if value else ""
-    if (
-        not first
-        or PRIVATE_STRING_PATTERN.search(first)
-        or SAFE_VERSION_PATTERN.fullmatch(first) is None
-    ):
+    if not first or PRIVATE_STRING_PATTERN.search(first):
         return "unavailable"
-    return first
+    normalized = re.sub(r"[^A-Za-z0-9 ._+():-]+", " ", first)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized or SAFE_VERSION_PATTERN.fullmatch(normalized) is None:
+        return "unavailable"
+    return normalized
 
 
 def _tool_version(name: str, command: Sequence[str]) -> dict[str, str]:
@@ -465,7 +465,7 @@ def _download_case(
     )
     assertions.append({"name": "download-command-succeeded", "passed": return_code == 0})
     if return_code != 0 or not isinstance(payload, dict):
-        base["warnings"].append(f"download-error-{error_code}")
+        base["warnings"].append(f"download-error-{error_code.lower()}")
         return base
     try:
         artifact_path = Path(str(payload["artifact_path"]))
@@ -1024,7 +1024,7 @@ def _transcription_case(
         {"name": "transcription-command-succeeded", "passed": return_code == 0}
     )
     if return_code != 0 or not isinstance(payload, dict):
-        base["warnings"].append(f"transcription-error-{error_code}")
+        base["warnings"].append(f"transcription-error-{error_code.lower()}")
         return base
     try:
         transcript_path = Path(str(payload["transcript_path"]))
@@ -1292,6 +1292,22 @@ def main(argv: list[str] | None = None) -> int:
         stream = sys.stdout if receipt["outcome"] == "pass" else sys.stderr
         print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=stream)
         return 0 if receipt["outcome"] == "pass" else 1
+    except KeyboardInterrupt:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error": {
+                        "code": "INTERRUPTED",
+                        "message": "Smoke harness was interrupted.",
+                    },
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 130
     except (SmokeError, ContractError, OSError, ValueError, subprocess.SubprocessError) as exc:
         code = exc.code if isinstance(exc, (SmokeError, ContractError)) else "SMOKE_HARNESS_FAILED"
         print(

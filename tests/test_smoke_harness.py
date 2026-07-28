@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -361,6 +362,12 @@ class SmokeHarnessTests(unittest.TestCase):
 
     def test_tool_versions_are_whitelisted_not_copied_from_raw_output(self):
         self.assertEqual(run_smoke._safe_version("ffmpeg 8.1"), "ffmpeg 8.1")
+        self.assertEqual(
+            run_smoke._safe_version(
+                "deno 2.9.4 (stable, release, aarch64-apple-darwin)"
+            ),
+            "deno 2.9.4 (stable release aarch64-apple-darwin)",
+        )
         for leaked in (
             "built on alice at /Volumes/secret/movie.mp4",
             "host=alice.local",
@@ -668,6 +675,97 @@ class SmokeHarnessTests(unittest.TestCase):
             loaded = run_smoke.read_json_strict(path, expected="smoke-receipt")
             self.assertEqual(loaded["source"]["fingerprint"], "0" * 64)
             self.assertEqual(loaded["warnings"], ["registered-source-environment-missing"])
+
+    def test_download_error_code_is_normalized_in_failure_receipt(self):
+        canonical_url = "https://www.youtube.com/watch?v=public"
+        fingerprint = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
+
+        def fake_runner(command, **unused):
+            if "detect" in command:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=json.dumps(
+                        {
+                            "status": "ok",
+                            "operation": "detect",
+                            "platform": "youtube",
+                            "source_fingerprint": fingerprint,
+                        }
+                    ),
+                    stderr="",
+                )
+            if "download" in command:
+                return subprocess.CompletedProcess(
+                    command,
+                    5,
+                    stdout="",
+                    stderr=json.dumps(
+                        {
+                            "status": "error",
+                            "error": {
+                                "code": "DOWNLOAD_FAILED",
+                                "message": "Sanitized failure.",
+                            },
+                        }
+                    ),
+                )
+            raise AssertionError(f"unexpected command: {command}")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt_dir = Path(temporary) / "receipts"
+            with (
+                mock.patch.object(run_smoke, "_commit_sha", return_value="b" * 40),
+                mock.patch.object(
+                    run_smoke, "implementation_digest", return_value="c" * 64
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_environment",
+                    return_value={"os": "linux", "arch": "x86_64", "python": "3.14.0"},
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "collect_tools",
+                    return_value=[{"name": "python", "version": "3.14.0"}],
+                ),
+            ):
+                receipt, path = run_smoke.run_case(
+                    "youtube-anonymous",
+                    receipt_dir=receipt_dir,
+                    environ={
+                        "AWESOME_CAPTURE_SMOKE_YOUTUBE_URL": canonical_url
+                    },
+                    runner=fake_runner,
+                )
+
+            self.assertEqual(receipt["outcome"], "fail")
+            self.assertEqual(receipt["warnings"], ["download-error-download_failed"])
+            self.assertTrue(path.is_file())
+
+    def test_cli_interrupt_uses_sanitized_json_protocol(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(run_smoke, "run_case", side_effect=KeyboardInterrupt),
+            mock.patch.object(sys, "stdout", stdout),
+            mock.patch.object(sys, "stderr", stderr),
+        ):
+            exit_code = run_smoke.main(
+                [
+                    "run",
+                    "youtube-anonymous",
+                    "--receipt-dir",
+                    "/private/tmp/unused-smoke-receipts",
+                ]
+            )
+
+        self.assertEqual(exit_code, 130)
+        self.assertEqual(stdout.getvalue(), "")
+        payload = json.loads(stderr.getvalue())
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"]["code"], "INTERRUPTED")
+        self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_successful_fake_download_generates_content_hash_only_receipt(self):
         canonical_url = "https://www.youtube.com/watch?v=public"
