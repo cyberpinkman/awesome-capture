@@ -154,10 +154,11 @@ GitHub smoke 只从原仓库默认分支进入 `awesome-capture-smoke` Environme
 
 下载 smoke 在联网前必须把规范化 URL 与 registry 中预登记的脱敏 SHA-256
 指纹匹配，workflow 不接收任意 URL。`twitter-anonymous` 用真实 `yt-dlp`
-证明自然直连；`twitter-gallery-fallback` 使用 registry 固定、receipt 明确
-披露的单次 `yt-dlp` `NETWORK_ERROR`，再让未修改的生产 fallback gate 调用
-真实 `gallery-dl`。后者只证明回退韧性，不证明 X 自然失败。不得提供任意
-故障命令、可执行路径或 workflow fault 输入。
+证明自然直连；`tiktok-gallery-fallback` 与 `twitter-gallery-fallback`
+各自绑定不可互换的 registry 固定 fault profile，使用 receipt 明确披露的单次
+`yt-dlp` `NETWORK_ERROR`，再让未修改的生产 fallback gate 调用真实
+`gallery-dl`。两者只证明回退韧性，不证明 TikTok 或 X 自然失败。不得提供
+任意故障命令、可执行路径，或 fault CLI、workflow、环境变量输入。
 
 ### Release metadata
 

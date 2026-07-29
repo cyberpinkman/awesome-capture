@@ -26,11 +26,19 @@ from contracts.contract_runtime import (  # noqa: E402
 
 CASES_PATH = ROOT / "smoke" / "cases.json"
 FUTURE_SKEW = dt.timedelta(minutes=5)
-CASES_SCHEMA = "awesome-capture.smoke-cases/v2"
-CONTROLLED_FAULT_PROFILE = "x-first-ytdlp-network-error-v1"
+CASES_SCHEMA = "awesome-capture.smoke-cases/v3"
+CONTROLLED_FAULT_BINDINGS = {
+    "twitter-gallery-fallback": (
+        "twitter",
+        "x-first-ytdlp-network-error-v1",
+    ),
+    "tiktok-gallery-fallback": (
+        "tiktok",
+        "tiktok-first-ytdlp-network-error-v1",
+    ),
+}
 CONTROLLED_FAULT_TOOL = "awesome-capture-smoke-fault"
 CONTROLLED_FAULT_WARNING = "controlled-ytdlp-network-error-injection"
-CONTROLLED_FAULT_VERSION = "x-first-ytdlp-network-error-v1"
 CONTROLLED_FAULT_ASSERTIONS = {
     "controlled-fault-profile-applied",
     "controlled-ytdlp-command-verified",
@@ -139,7 +147,7 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
         if suite == "download":
             required = common | {"source_fingerprint"}
             allowed = required | {"expectation"}
-            if raw.get("case_id") == "twitter-gallery-fallback":
+            if raw.get("case_id") in CONTROLLED_FAULT_BINDINGS:
                 required |= {"fault_profile"}
                 allowed |= {"fault_profile"}
         elif suite == "transcription":
@@ -211,16 +219,25 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
                 "Preregistered smoke expectation is malformed.",
             )
         fault_profile = raw.get("fault_profile")
+        controlled_binding = CONTROLLED_FAULT_BINDINGS.get(raw["case_id"])
         if fault_profile is not None and (
-            fault_profile != CONTROLLED_FAULT_PROFILE
-            or raw["case_id"] != "twitter-gallery-fallback"
+            controlled_binding is None
             or suite != "download"
-            or raw.get("platform") != "twitter"
+            or raw.get("platform") != controlled_binding[0]
+            or fault_profile != controlled_binding[1]
             or expectation != "gallery-dl"
         ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
                 "Preregistered controlled fault binding is malformed.",
+            )
+        if (
+            controlled_binding is not None
+            and fault_profile != controlled_binding[1]
+        ):
+            raise ContractError(
+                "SMOKE_CASES_INVALID",
+                "Registered gallery fallback lacks its controlled fault profile.",
             )
         required_tools = raw.get("required_tools")
         if (
@@ -238,7 +255,7 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
                 "Preregistered smoke tool evidence is malformed.",
             )
         if (CONTROLLED_FAULT_TOOL in required_tools) != (
-            fault_profile == CONTROLLED_FAULT_PROFILE
+            fault_profile is not None
         ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
@@ -254,6 +271,20 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
         raise ContractError(
             "SMOKE_CASES_INVALID",
             "Preregistered download source identities are duplicated.",
+        )
+    registered_controlled_cases = {
+        case_id
+        for case_id, case in registry.items()
+        if case.get("fault_profile") is not None
+    }
+    if (
+        registered_controlled_cases != set(CONTROLLED_FAULT_BINDINGS)
+        or len({binding[1] for binding in CONTROLLED_FAULT_BINDINGS.values()})
+        != len(CONTROLLED_FAULT_BINDINGS)
+    ):
+        raise ContractError(
+            "SMOKE_CASES_INVALID",
+            "Preregistered controlled faults are incomplete or duplicated.",
         )
     return registry
 
@@ -274,7 +305,12 @@ def _required_assertions(case: dict[str, Any]) -> set[str]:
             required.add(f"required-{case['expectation']}-observed")
         else:
             required.add("anonymous-route-observed")
-        if case.get("fault_profile") == CONTROLLED_FAULT_PROFILE:
+        controlled_binding = CONTROLLED_FAULT_BINDINGS.get(case["case_id"])
+        if (
+            controlled_binding is not None
+            and case.get("platform") == controlled_binding[0]
+            and case.get("fault_profile") == controlled_binding[1]
+        ):
             required.update(CONTROLLED_FAULT_ASSERTIONS)
         return required
     required = {
@@ -358,14 +394,19 @@ def validate_case_evidence(value: dict[str, Any]) -> None:
         or CONTROLLED_FAULT_WARNING in value["warnings"]
         or CONTROLLED_FAULT_TOOL in tools
     )
-    registered_fault = case.get("fault_profile") == CONTROLLED_FAULT_PROFILE
+    controlled_binding = CONTROLLED_FAULT_BINDINGS.get(case["case_id"])
+    registered_fault = (
+        controlled_binding is not None
+        and case.get("platform") == controlled_binding[0]
+        and case.get("fault_profile") == controlled_binding[1]
+    )
     if controlled_claimed and not registered_fault:
         raise ContractError(
             "SMOKE_CASE_MISMATCH",
             "Unregistered smoke case claims a controlled fault.",
         )
     if registered_fault and controlled_claimed and (
-        tools.get(CONTROLLED_FAULT_TOOL) != CONTROLLED_FAULT_VERSION
+        tools.get(CONTROLLED_FAULT_TOOL) != case["fault_profile"]
         or CONTROLLED_FAULT_WARNING not in value["warnings"]
         or controlled_assertions_present != CONTROLLED_FAULT_ASSERTIONS
     ):

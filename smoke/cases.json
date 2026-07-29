@@ -1,5 +1,5 @@
 {
-  "schema_version": "awesome-capture.smoke-cases/v2",
+  "schema_version": "awesome-capture.smoke-cases/v3",
   "cases": [
     {
       "case_id": "bilibili-anonymous",
@@ -40,8 +40,9 @@
       "platform": "tiktok",
       "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL",
       "source_fingerprint": "b545290e1e73bdef651fcecbf4a4948372f41ae4d9b2821854def2cf42bd1d03",
-      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
-      "expectation": "gallery-dl"
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl", "awesome-capture-smoke-fault"],
+      "expectation": "gallery-dl",
+      "fault_profile": "tiktok-first-ytdlp-network-error-v1"
     },
     {
       "case_id": "twitter-gallery-fallback",

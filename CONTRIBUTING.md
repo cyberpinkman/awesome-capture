@@ -165,10 +165,11 @@ Cookie 必须留在受控环境；普通 PR CI 不下载模型，也不接收任
   SHA-256 指纹匹配；workflow 不接受任意 URL。修改样本指纹会改变当前实现
   digest，必须为新 digest 重新生成证据。
 - `twitter-anonymous` 使用真实 `yt-dlp` 证明自然直连；
-  `twitter-gallery-fallback` 使用 registry 固定、receipt 明确披露的单次
-  `yt-dlp` `NETWORK_ERROR`，再让未修改的生产 fallback gate 调用真实
-  `gallery-dl`。后者是回退韧性证据，不得表述为 X 自然失败。不得新增接受
-  任意故障命令、可执行路径或 workflow 参数的入口。
+  `tiktok-gallery-fallback` 与 `twitter-gallery-fallback` 各自使用不可互换的
+  registry 固定 fault profile，并在 receipt 中明确披露单次 `yt-dlp`
+  `NETWORK_ERROR`，再让未修改的生产 fallback gate 调用真实 `gallery-dl`。
+  两者都是回退韧性证据，不得表述为 TikTok 或 X 自然失败。不得新增接受任意
+  故障命令、可执行路径，或 fault CLI、workflow、环境变量输入的入口。
 - smoke receipt 只有在独立执行 `python3 tools/smoke_receipts.py validate`
   并传入 receipt 路径、`--require-current-digest`、`--require-single` 和
   `--require-case <alias>`，通过 schema、digest、case、脱敏和 outcome 复验

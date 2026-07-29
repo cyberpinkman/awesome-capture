@@ -54,15 +54,23 @@ from tools.smoke_receipts import (  # noqa: E402
 )
 
 
-CASES_SCHEMA = "awesome-capture.smoke-cases/v2"
+CASES_SCHEMA = "awesome-capture.smoke-cases/v3"
 RECEIPT_SCHEMA = "awesome-capture.smoke-receipt/v1"
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_NAME_PATTERN = re.compile(r"^AWESOME_CAPTURE_SMOKE_[A-Z0-9_]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-CONTROLLED_FAULT_PROFILE = "x-first-ytdlp-network-error-v1"
+CONTROLLED_FAULT_BINDINGS = {
+    "twitter-gallery-fallback": (
+        "twitter",
+        "x-first-ytdlp-network-error-v1",
+    ),
+    "tiktok-gallery-fallback": (
+        "tiktok",
+        "tiktok-first-ytdlp-network-error-v1",
+    ),
+}
 CONTROLLED_FAULT_TOOL = "awesome-capture-smoke-fault"
 CONTROLLED_FAULT_WARNING = "controlled-ytdlp-network-error-injection"
-CONTROLLED_FAULT_VERSION = "x-first-ytdlp-network-error-v1"
 CONTROLLED_FAULT_ASSERTIONS = {
     "controlled-fault-profile-applied",
     "controlled-ytdlp-command-verified",
@@ -110,7 +118,7 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
         if suite == "download":
             required = common | {"source_fingerprint"}
             allowed = required | {"expectation"}
-            if raw.get("case_id") == "twitter-gallery-fallback":
+            if raw.get("case_id") in CONTROLLED_FAULT_BINDINGS:
                 required |= {"fault_profile"}
                 allowed |= {"fault_profile"}
         elif suite == "transcription":
@@ -181,11 +189,14 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
         if expectation is not None and expectation not in valid_expectations:
             raise SmokeError("INVALID_CASES", "Smoke case expectation is invalid.")
         fault_profile = raw.get("fault_profile")
+        controlled_binding = CONTROLLED_FAULT_BINDINGS.get(
+            str(raw.get("case_id"))
+        )
         if fault_profile is not None and (
-            fault_profile != CONTROLLED_FAULT_PROFILE
-            or raw.get("case_id") != "twitter-gallery-fallback"
+            controlled_binding is None
             or suite != "download"
-            or raw.get("platform") != "twitter"
+            or raw.get("platform") != controlled_binding[0]
+            or fault_profile != controlled_binding[1]
             or expectation != "gallery-dl"
         ):
             raise SmokeError(
@@ -193,12 +204,12 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
                 "Controlled smoke fault profile binding is invalid.",
             )
         if (
-            raw.get("case_id") == "twitter-gallery-fallback"
-            and fault_profile != CONTROLLED_FAULT_PROFILE
+            controlled_binding is not None
+            and fault_profile != controlled_binding[1]
         ):
             raise SmokeError(
                 "INVALID_CASES",
-                "Twitter gallery fallback must declare its controlled fault profile.",
+                "Registered gallery fallback must declare its controlled fault profile.",
             )
         required_tools = raw.get("required_tools")
         if (
@@ -217,9 +228,7 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
                 "Smoke case required tools are invalid.",
             )
         has_controlled_tool = CONTROLLED_FAULT_TOOL in required_tools
-        if has_controlled_tool != (
-            fault_profile == CONTROLLED_FAULT_PROFILE
-        ):
+        if has_controlled_tool != (fault_profile is not None):
             raise SmokeError(
                 "INVALID_CASES",
                 "Controlled smoke tool evidence binding is invalid.",
@@ -234,6 +243,20 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
         raise SmokeError(
             "INVALID_CASES",
             "Download smoke source fingerprints must be unique.",
+        )
+    registered_controlled_cases = {
+        case["case_id"]
+        for case in cases
+        if case.get("fault_profile") is not None
+    }
+    if (
+        registered_controlled_cases != set(CONTROLLED_FAULT_BINDINGS)
+        or len({binding[1] for binding in CONTROLLED_FAULT_BINDINGS.values()})
+        != len(CONTROLLED_FAULT_BINDINGS)
+    ):
+        raise SmokeError(
+            "INVALID_CASES",
+            "Controlled smoke fault registrations are incomplete or duplicated.",
         )
     return cases
 
@@ -620,16 +643,27 @@ def _controlled_ytdlp_command_valid(
     command: Sequence[str],
     *,
     source: str,
+    case_id: str,
     output_dir: Path,
     executable: Path,
     pinned_cwd: Path | None,
 ) -> bool:
+    binding = CONTROLLED_FAULT_BINDINGS.get(case_id)
+    if binding is None:
+        return False
+    platform_name = binding[0]
+    extractor = {
+        "tiktok": "TikTok",
+        "twitter": "Twitter",
+    }.get(platform_name)
+    if extractor is None:
+        return False
     expected = [
         str(executable),
         "--ignore-config",
         "--no-playlist",
         "--use-extractors",
-        "Twitter",
+        extractor,
         "--socket-timeout",
         "20",
         "--retries",
@@ -637,20 +671,25 @@ def _controlled_ytdlp_command_valid(
         "--fragment-retries",
         "3",
         "--no-warnings",
-        "--force-ipv4",
-        "--part",
-        "--no-overwrites",
-        "--write-info-json",
-        "--format",
-        "bv*+ba/b",
-        "--paths",
-        "temp:.",
-        "--output",
-        "%(id)s--%(title).120B.%(ext)s",
-        "--print",
-        "after_move:%(filepath)j",
-        source,
     ]
+    if platform_name == "twitter":
+        expected.append("--force-ipv4")
+    expected.extend(
+        [
+            "--part",
+            "--no-overwrites",
+            "--write-info-json",
+            "--format",
+            "bv*+ba/b",
+            "--paths",
+            "temp:.",
+            "--output",
+            "%(id)s--%(title).120B.%(ext)s",
+            "--print",
+            "after_move:%(filepath)j",
+            source,
+        ]
+    )
     return (
         list(command) == expected
         and _private_staging_directory(pinned_cwd, output_dir=output_dir)
@@ -661,23 +700,33 @@ def _controlled_gallery_command_valid(
     command: Sequence[str],
     *,
     source: str,
+    case_id: str,
     output_dir: Path,
     executable: Path,
     pinned_cwd: Path | None,
 ) -> bool:
+    binding = CONTROLLED_FAULT_BINDINGS.get(case_id)
+    if binding is None:
+        return False
+    platform_name = binding[0]
     expected = [
         str(executable),
         "--config-ignore",
         "--no-input",
-        "--force-ipv4",
-        "--range",
-        "1",
-        "-D",
-        ".",
-        "-f",
-        "download.{extension}",
-        source,
     ]
+    if platform_name == "twitter":
+        expected.append("--force-ipv4")
+    expected.extend(
+        [
+            "--range",
+            "1",
+            "-D",
+            ".",
+            "-f",
+            "download.{extension}",
+            source,
+        ]
+    )
     return (
         list(command) == expected
         and _private_staging_directory(pinned_cwd, output_dir=output_dir)
@@ -727,10 +776,19 @@ def _load_controlled_download_module() -> Any:
 
 def _controlled_fallback_runner(
     *,
+    case_id: str,
     source: str,
     output_dir: Path,
     state: dict[str, Any],
 ) -> Callable[..., subprocess.CompletedProcess[str]]:
+    binding = CONTROLLED_FAULT_BINDINGS.get(case_id)
+    if binding is None:
+        raise SmokeError(
+            "CONTROLLED_FAULT_MISMATCH",
+            "The controlled fallback case is not registered.",
+            exit_code=7,
+        )
+    platform_name, fault_profile = binding
     yt_dlp = _snapshot_controlled_tool("yt-dlp")
     gallery_dl = _snapshot_controlled_tool("gallery-dl")
     download_script_sha256 = _sha256_file(DOWNLOAD_SCRIPT)
@@ -772,6 +830,7 @@ def _controlled_fallback_runner(
             and _controlled_ytdlp_command_valid(
                 command,
                 source=source,
+                case_id=case_id,
                 output_dir=output_dir,
                 executable=yt_dlp["path"],
                 pinned_cwd=pinned_cwd,
@@ -798,14 +857,19 @@ def _controlled_fallback_runner(
 
     def observed_can_gallery_fallback(
         args: argparse.Namespace,
-        platform_name: str,
+        observed_platform_name: str,
         error: Any,
     ) -> bool:
         state["fallback_gate_count"] += 1
-        accepted = original_can_gallery_fallback(args, platform_name, error)
+        state["fallback_platform"] = observed_platform_name
+        accepted = original_can_gallery_fallback(
+            args,
+            observed_platform_name,
+            error,
+        )
         state["fallback_gate_accepted"] = (
             state["fallback_gate_count"] == 1
-            and platform_name == "twitter"
+            and observed_platform_name == platform_name
             and getattr(error, "code", None) == "NETWORK_ERROR"
             and accepted is True
         )
@@ -824,6 +888,7 @@ def _controlled_fallback_runner(
             and _controlled_gallery_command_valid(
                 command,
                 source=source,
+                case_id=case_id,
                 output_dir=output_dir,
                 executable=gallery_dl["path"],
                 pinned_cwd=pinned_cwd,
@@ -857,13 +922,13 @@ def _controlled_fallback_runner(
     ) -> subprocess.CompletedProcess[str]:
         nonlocal invocation_count
         invocation_count += 1
-        state["fault_profile_applied"] = True
         if invocation_count != 1 or list(command) != expected_command:
             raise SmokeError(
                 "CONTROLLED_FAULT_MISMATCH",
                 "The controlled fallback command is not the registered command.",
                 exit_code=7,
             )
+        state["fault_profile_applied"] = fault_profile
         stdout = io.StringIO()
         stderr = io.StringIO()
         module.require_tool = fixed_require_tool
@@ -903,7 +968,14 @@ def _controlled_fault_assertion_rows(
     artifact_path: Path,
     output_dir: Path,
 ) -> list[dict[str, Any]]:
-    if case.get("fault_profile") != CONTROLLED_FAULT_PROFILE:
+    controlled_binding = CONTROLLED_FAULT_BINDINGS.get(
+        str(case.get("case_id"))
+    )
+    if (
+        controlled_binding is None
+        or case.get("platform") != controlled_binding[0]
+        or case.get("fault_profile") != controlled_binding[1]
+    ):
         return []
     expected_warning = (
         "yt-dlp failed with NETWORK_ERROR; used the bounded gallery-dl fallback."
@@ -928,6 +1000,7 @@ def _controlled_fault_assertion_rows(
         and isinstance(artifact.get("producer"), Mapping)
         and artifact["producer"].get("tool") == "gallery-dl"
         and isinstance(artifact.get("source"), Mapping)
+        and artifact["source"].get("platform") == case["platform"]
         and artifact["source"].get("fingerprint") == case["source_fingerprint"]
         and isinstance(artifact.get("acquisition"), Mapping)
         and artifact["acquisition"].get("auth_mode") == "anonymous"
@@ -935,7 +1008,7 @@ def _controlled_fault_assertion_rows(
     )
     values = {
         "controlled-fault-profile-applied": (
-            state.get("fault_profile_applied") is True
+            state.get("fault_profile_applied") == case["fault_profile"]
         ),
         "controlled-ytdlp-command-verified": (
             state.get("yt_dlp_command_verified") is True
@@ -950,6 +1023,7 @@ def _controlled_fault_assertion_rows(
         "controlled-production-fallback-gate-accepted": (
             state.get("fallback_gate_count") == 1
             and state.get("fallback_gate_accepted") is True
+            and state.get("fallback_platform") == case["platform"]
         ),
         "controlled-gallery-dl-command-verified": (
             state.get("gallery_command_verified") is True
@@ -998,9 +1072,15 @@ def _download_case(
         },
     ]
     fault_profile = case.get("fault_profile")
+    controlled_binding = CONTROLLED_FAULT_BINDINGS.get(case["case_id"])
+    registered_fault = (
+        controlled_binding is not None
+        and case["platform"] == controlled_binding[0]
+        and fault_profile == controlled_binding[1]
+    )
     fault_tool = (
-        [{"name": CONTROLLED_FAULT_TOOL, "version": CONTROLLED_FAULT_VERSION}]
-        if fault_profile == CONTROLLED_FAULT_PROFILE
+        [{"name": CONTROLLED_FAULT_TOOL, "version": fault_profile}]
+        if registered_fault
         else []
     )
     base = {
@@ -1029,7 +1109,7 @@ def _download_case(
             warning = "registered-source-not-canonical"
         base["warnings"].append(warning)
         return base
-    if fault_profile == CONTROLLED_FAULT_PROFILE:
+    if registered_fault:
         base["warnings"].append(CONTROLLED_FAULT_WARNING)
         base["tools"] = collect_tools(
             [
@@ -1039,20 +1119,22 @@ def _download_case(
         )
     output_dir = work_dir / "download"
     fault_state: dict[str, Any] = {
-        "fault_profile_applied": False,
+        "fault_profile_applied": None,
         "fault_trigger_count": 0,
         "yt_dlp_command_verified": False,
         "network_error_observed": False,
         "fallback_gate_count": 0,
         "fallback_gate_accepted": False,
+        "fallback_platform": None,
         "gallery_execution_count": 0,
         "gallery_command_verified": False,
         "tool_identities_stable": False,
     }
     download_runner = runner
-    if fault_profile == CONTROLLED_FAULT_PROFILE:
+    if registered_fault:
         try:
             download_runner = _controlled_fallback_runner(
+                case_id=case["case_id"],
                 source=source,
                 output_dir=output_dir,
                 state=fault_state,

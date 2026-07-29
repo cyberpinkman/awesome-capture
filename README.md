@@ -405,17 +405,18 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
 
 当前下载发布证据覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
 匿名下载，Douyin 隔离临时浏览器，以及 TikTok/X 的 gallery fallback。
-其中 `twitter-anonymous` 使用真实 `yt-dlp` 直连，证明 X 的自然匿名路径；
-`twitter-gallery-fallback` 则对另一份固定公开样本使用已登记并在 receipt
-中披露的单次 `yt-dlp` `NETWORK_ERROR`，随后由未修改的生产 fallback gate
-选择真实 `gallery-dl` 完成获取。后者是回退韧性证据，不表示 X 在该次运行中
-自然失败。TikTok case 仍验证实际观察到的自然 gallery fallback。
+其中 `twitter-anonymous` 使用真实 `yt-dlp` 直连，证明 X 的自然匿名路径。
+`tiktok-gallery-fallback` 与 `twitter-gallery-fallback` 各自绑定不可互换的
+registry 固定 fault profile：对各自预登记公开样本注入一次、在 receipt 中
+明确披露的 `yt-dlp` `NETWORK_ERROR`，随后由未修改的生产 fallback gate
+选择真实 `gallery-dl` 完成获取。两项 case 都只证明回退韧性，不表示 TikTok
+或 X 在该次运行中自然失败。
 X/Twitter 的 yt-dlp 与 gallery-dl 获取路径会使用官方 `--force-ipv4` 选项，
 以规避已复现的媒体 CDN TLS EOF；证书校验仍保持开启，其他平台不受影响。
 
-该受控故障不是通用测试后门：workflow 只接收 case alias，registry 只允许
-固定 fault profile；不存在可由调用者提供的故障命令、可执行路径或 workflow
-输入。
+这些受控故障不是通用测试后门：workflow 只接收 case alias，registry 只允许
+case、平台和 fault profile 的固定绑定；TikTok 与 X 的 profile 不能互换，也
+不存在调用者可传入的任意 fault CLI、workflow 或环境变量输入。
 
 离线测试证明契约、安全边界、故障恢复和幂等行为，不证明外部平台或具体
 ASR/硬件组合当前可用。对外发布受影响的平台或引擎时，应生成
@@ -441,9 +442,9 @@ git diff --check
 计算实现身份，并用
 `validate ... --require-pass --require-current-digest`
 校验生成的脱敏 receipt。`smoke/cases.json` 登记 case alias、证据要求、秘密
-环境变量名和下载样本的脱敏 SHA-256 指纹，但不保存原始 URL；受控 X fallback
-还固定登记唯一 fault profile。receipt 禁止原始 URL、Cookie、token、媒体
-内容、transcript 和私有绝对路径。
+环境变量名和下载样本的脱敏 SHA-256 指纹，但不保存原始 URL；受控 TikTok/X
+fallback 还分别固定登记不可互换的 fault profile。receipt 禁止原始 URL、
+Cookie、token、媒体内容、transcript 和私有绝对路径。
 
 正式 smoke receipt 也只证明其记录的 commit、implementation digest、工具版本和公开样本上的链路可运行，不证明所有账号、地区、网络或未来平台版本都可用。
 

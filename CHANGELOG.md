@@ -19,8 +19,10 @@
   自然直连；`twitter-gallery-fallback` 使用已披露的单次受控网络错误，通过
   未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性，不再
   把受控路径表述为平台自然失败。
-- TikTok gallery fallback 改用更小的预登记公开样本；其当前生产路径仍会
-  自然触发 `gallery-dl`，避免把已经恢复直连的样本误报为回退证据。
+- TikTok 同一预登记公开样本的自然路由在几分钟内从 gallery fallback 漂移为
+  直接成功，因此 `tiktok-gallery-fallback` 改用独立、明确披露的固定受控
+  `NETWORK_ERROR` profile；TikTok 与 X 的 profile 不可互换，两者都通过
+  未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性。
 - X/Twitter 的 yt-dlp 与 gallery-dl 获取命令仅对该平台固定使用 IPv4，
   修复默认地址族访问媒体 CDN 时可复现的 TLS EOF，同时保持证书校验开启。
 
@@ -30,9 +32,9 @@
   self-hosted runner 不执行 fork/PR ref，receipt 仅在独立通过 schema、
   current digest、case、单文件、脱敏和 outcome 复验后上传，每次 attempt
   使用唯一目录隔离历史结果。
-- 下载 smoke URL 必须匹配 registry 中预登记的规范化 SHA-256 指纹；受控 X
-  fallback 只允许固定 fault profile，不接受任意故障命令、可执行路径或
-  workflow 输入。
+- 下载 smoke URL 必须匹配 registry 中预登记的规范化 SHA-256 指纹；受控
+  TikTok/X fallback 只允许各自不可互换的固定 fault profile，不接受任意故障
+  命令、可执行路径，或 fault CLI、workflow、环境变量输入。
 
 ## [0.1.0] - 2026-07-28
 
