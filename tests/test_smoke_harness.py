@@ -1463,6 +1463,7 @@ class SmokeHarnessTests(unittest.TestCase):
                 "--fragment-retries",
                 "3",
                 "--no-warnings",
+                "--force-ipv4",
                 "--part",
                 "--no-overwrites",
                 "--write-info-json",
@@ -1490,6 +1491,7 @@ class SmokeHarnessTests(unittest.TestCase):
                 "header": ["--add-header", "Authorization: redacted"],
                 "exec": ["--exec", "false"],
                 "cookies-equals": ["--cookies=/private/fixture-cookies.txt"],
+                "certificate-bypass": ["--no-check-certificates"],
             }
             for name, injected in injections.items():
                 with self.subTest(name=name):
@@ -1503,6 +1505,66 @@ class SmokeHarnessTests(unittest.TestCase):
                             pinned_cwd=staging,
                         )
                     )
+
+    def test_controlled_gallery_command_rejects_certificate_bypass(self):
+        source = "https://twitter.com/video/status/745240047289458688"
+        executable = Path("/private/controlled-tools/gallery-dl")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = run_smoke.secure_mkdirs(Path(temporary))
+            output_dir = root / "output"
+            staging_parent = (
+                output_dir
+                / ".awesome-capture-media"
+                / "v2"
+                / "staging"
+            )
+            staging_parent.mkdir(parents=True, mode=0o700)
+            for parent in (
+                output_dir,
+                output_dir / ".awesome-capture-media",
+                output_dir / ".awesome-capture-media" / "v2",
+                staging_parent,
+            ):
+                os.chmod(parent, 0o700)
+            staging = staging_parent / "registered.0123456789abcdef"
+            staging.mkdir(mode=0o700)
+
+            valid = [
+                str(executable),
+                "--config-ignore",
+                "--no-input",
+                "--force-ipv4",
+                "--range",
+                "1",
+                "-D",
+                ".",
+                "-f",
+                "download.{extension}",
+                source,
+            ]
+            self.assertTrue(
+                run_smoke._controlled_gallery_command_valid(
+                    valid,
+                    source=source,
+                    output_dir=output_dir,
+                    executable=executable,
+                    pinned_cwd=staging,
+                )
+            )
+            injected = [
+                *valid[:-1],
+                "--no-check-certificate",
+                valid[-1],
+            ]
+            self.assertFalse(
+                run_smoke._controlled_gallery_command_valid(
+                    injected,
+                    source=source,
+                    output_dir=output_dir,
+                    executable=executable,
+                    pinned_cwd=staging,
+                )
+            )
 
     def test_controlled_fallback_runs_real_production_download_offline(self):
         ffmpeg = shutil.which("ffmpeg")
@@ -1576,7 +1638,8 @@ class SmokeHarnessTests(unittest.TestCase):
                     "    raise SystemExit(0)\n"
                     f"source = {source!r}\n"
                     "expected = [\n"
-                    "    '--config-ignore', '--no-input', '--range', '1',\n"
+                    "    '--config-ignore', '--no-input', '--force-ipv4', "
+                    "'--range', '1',\n"
                     "    '-D', '.', '-f', 'download.{extension}', source,\n"
                     "]\n"
                     "if sys.argv[1:] != expected:\n"

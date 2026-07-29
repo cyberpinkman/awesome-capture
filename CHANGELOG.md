@@ -19,6 +19,10 @@
   自然直连；`twitter-gallery-fallback` 使用已披露的单次受控网络错误，通过
   未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性，不再
   把受控路径表述为平台自然失败。
+- TikTok gallery fallback 改用更小的预登记公开样本；其当前生产路径仍会
+  自然触发 `gallery-dl`，避免把已经恢复直连的样本误报为回退证据。
+- X/Twitter 的 yt-dlp 与 gallery-dl 获取命令仅对该平台固定使用 IPv4，
+  修复默认地址族访问媒体 CDN 时可复现的 TLS EOF，同时保持证书校验开启。
 
 ### Security
 

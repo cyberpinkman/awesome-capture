@@ -405,6 +405,8 @@ def base_ytdlp_args(args: argparse.Namespace, platform_name: str) -> list[str]:
         str(args.retries),
         "--no-warnings",
     ]
+    if platform_name == "twitter":
+        command.append("--force-ipv4")
     command.extend(auth_args(args))
     if getattr(args, "impersonate", None):
         command.extend(["--impersonate", args.impersonate])
@@ -2444,14 +2446,20 @@ def _gallery_download_locked(
             gallery,
             "--config-ignore",
             "--no-input",
-            "--range",
-            "1",
-            "-D",
-            ".",
-            "-f",
-            "download.{extension}",
-            url,
         ]
+        if platform_name == "twitter":
+            command.append("--force-ipv4")
+        command.extend(
+            [
+                "--range",
+                "1",
+                "-D",
+                ".",
+                "-f",
+                "download.{extension}",
+                url,
+            ]
+        )
         process = run_process_raw(command, timeout=args.timeout, pinned_cwd=staging)
         _secure_staging_tree(staging)
         if process.returncode != 0:

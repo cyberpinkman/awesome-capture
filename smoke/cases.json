@@ -39,7 +39,7 @@
       "suite": "download",
       "platform": "tiktok",
       "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL",
-      "source_fingerprint": "ece40e87815163ac2fa27acc7fbb53ce2f10b25b19e9c42e9655fa5fb30c0095",
+      "source_fingerprint": "b545290e1e73bdef651fcecbf4a4948372f41ae4d9b2821854def2cf42bd1d03",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
       "expectation": "gallery-dl"
     },

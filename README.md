@@ -410,6 +410,8 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
 中披露的单次 `yt-dlp` `NETWORK_ERROR`，随后由未修改的生产 fallback gate
 选择真实 `gallery-dl` 完成获取。后者是回退韧性证据，不表示 X 在该次运行中
 自然失败。TikTok case 仍验证实际观察到的自然 gallery fallback。
+X/Twitter 的 yt-dlp 与 gallery-dl 获取路径会使用官方 `--force-ipv4` 选项，
+以规避已复现的媒体 CDN TLS EOF；证书校验仍保持开启，其他平台不受影响。
 
 该受控故障不是通用测试后门：workflow 只接收 case alias，registry 只允许
 固定 fault profile；不存在可由调用者提供的故障命令、可执行路径或 workflow
