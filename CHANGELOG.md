@@ -11,6 +11,11 @@
 - 建立公开 Pull Request 贡献规范、证据矩阵和 PR 模板，明确分支工作流、
   contract/smoke/安全要求、CI 失败处理及最终 head SHA 合并门槛。
 
+### Fixed
+
+- macOS smoke harness 通过 POSIX 安全运行层统一固定的 `/var`、`/tmp` 系统别名，
+  避免长转写崩溃续跑因临时目录与 chunk manifest 路径拼写不同而误判失败。
+
 ### Security
 
 - 手动真实 smoke 仅允许原仓库默认分支进入受控 Environment；持久

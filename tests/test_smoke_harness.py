@@ -434,6 +434,9 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertIn(Path("contracts/contract_runtime.py"), paths)
         self.assertIn(Path("tools/run_smoke.py"), paths)
         self.assertIn(Path("smoke/cases.json"), paths)
+        self.assertFalse(
+            any(path.parts[:2] == ("smoke", "receipts") for path in paths)
+        )
         self.assertRegex(smoke_receipts.implementation_digest(), r"^[0-9a-f]{64}$")
 
     def test_registered_passing_receipt_satisfies_release_evidence_contract(self):
@@ -781,6 +784,80 @@ class SmokeHarnessTests(unittest.TestCase):
             loaded = run_smoke.read_json_strict(path, expected="smoke-receipt")
             self.assertEqual(loaded["source"]["fingerprint"], "0" * 64)
             self.assertEqual(loaded["warnings"], ["registered-source-environment-missing"])
+
+    def test_long_resume_uses_secure_canonical_temporary_path_identity(self):
+        alias = Path(
+            "/var/folders/fixture/awesome-capture-smoke-external-long-resume"
+        )
+        canonical = Path(
+            "/private/var/folders/fixture/"
+            "awesome-capture-smoke-external-long-resume"
+        )
+        temporary_context = mock.MagicMock()
+        temporary_context.__enter__.return_value = str(alias)
+        temporary_context.__exit__.return_value = False
+        details = {
+            "source": {
+                "platform": "local",
+                "fingerprint": "0" * 64,
+                "auth_mode": "not-applicable",
+                "fallback": None,
+            },
+            "engine": None,
+            "artifacts": [],
+            "assertions": [
+                {"name": "partial-chunk-state-observed", "passed": False}
+            ],
+            "warnings": ["partial-chunk-state-not-observed"],
+            "tools": [],
+        }
+
+        with tempfile.TemporaryDirectory() as receipt_temporary:
+            receipt_dir = Path(receipt_temporary) / "receipts"
+            with (
+                mock.patch.object(
+                    run_smoke.tempfile,
+                    "TemporaryDirectory",
+                    return_value=temporary_context,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "secure_mkdirs",
+                    return_value=canonical,
+                ) as secure_work_dir,
+                mock.patch.object(
+                    run_smoke,
+                    "_transcription_case",
+                    return_value=details,
+                ) as transcription_case,
+                mock.patch.object(run_smoke, "_commit_sha", return_value="b" * 40),
+                mock.patch.object(
+                    run_smoke, "implementation_digest", return_value="c" * 64
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_environment",
+                    return_value={
+                        "os": "macos",
+                        "arch": "arm64",
+                        "python": "3.14.0",
+                    },
+                ),
+            ):
+                receipt, path = run_smoke.run_case(
+                    "external-long-resume",
+                    receipt_dir=receipt_dir,
+                    environ={
+                        "AWESOME_CAPTURE_SMOKE_LONG_MEDIA": "/local/source.wav",
+                        "AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL": "/local/model",
+                        "AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER": "/local/adapter",
+                    },
+                )
+            self.assertTrue(path.is_file())
+
+        self.assertEqual(receipt["outcome"], "fail")
+        secure_work_dir.assert_called_once_with(alias)
+        self.assertEqual(transcription_case.call_args.args[4], canonical)
 
     def test_download_error_code_is_normalized_in_failure_receipt(self):
         canonical_url = "https://www.youtube.com/watch?v=public"

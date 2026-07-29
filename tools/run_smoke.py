@@ -38,6 +38,7 @@ from contracts.contract_runtime import (  # noqa: E402
     validate_contract,
     validate_file_context,
 )
+from contracts.media_runtime import SafeRuntimeError, secure_mkdirs  # noqa: E402
 from contracts.posix_runtime import (  # noqa: E402
     PosixRuntimeError,
     atomic_write_noclobber,
@@ -1187,7 +1188,19 @@ def run_case(
     source = environ.get(case["source_env"], "")
     created_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     with tempfile.TemporaryDirectory(prefix=f"awesome-capture-smoke-{case_id}-") as temporary:
-        work_dir = Path(temporary)
+        try:
+            # Keep the harness path spelling aligned with the managed media
+            # runtime. On macOS, tempfile may return the fixed /var or /tmp
+            # aliases while published manifests use /private/var or
+            # /private/tmp. secure_mkdirs performs the POSIX no-follow checks
+            # and returns the runtime's canonical spelling for those aliases.
+            work_dir = secure_mkdirs(Path(temporary))
+        except SafeRuntimeError as exc:
+            raise SmokeError(
+                exc.code,
+                "Smoke working directory is unsafe.",
+                exit_code=exc.exit_code,
+            ) from exc
         if not source:
             details: dict[str, Any] = {
                 "source": {
