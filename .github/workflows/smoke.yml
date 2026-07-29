@@ -120,7 +120,7 @@ jobs:
           command -v deno
           deno --version
 
-      - name: Run preregistered public smoke
+      - name: Run preregistered public smoke with case-defined route
         env:
           RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         run: |

@@ -49,6 +49,14 @@ git diff --check
 digest、脱敏和 `outcome: pass` 校验，并匹配待发布实现；时间戳保留用于审计，
 不设置固定过期天数。不得用旧 implementation digest 的结果替代当前实现证据。
 
+下载 smoke 的公开 URL 必须先规范化，并匹配 `smoke/cases.json` 中预登记的
+脱敏 SHA-256 指纹，workflow 不接受任意 URL。X 的两项证据不可混为一谈：
+`twitter-anonymous` 证明真实 `yt-dlp` 自然直连；`twitter-gallery-fallback`
+使用固定样本和 receipt 中明确披露的单次 `yt-dlp` `NETWORK_ERROR`，再通过
+未修改的生产 fallback gate 执行真实 `gallery-dl` 获取。后者只证明回退韧性，
+不得描述为 X 自然失败。该 fault profile 由 registry 固定，不存在调用者可传入
+的故障命令、可执行路径或 workflow 参数。
+
 正式 Release 当前要求 `smoke/cases.json` 中每个预登记 case 都有匹配证据。
 从 `manual smoke` workflow 下载 receipt artifact 后，应先逐份运行严格校验，
 再仅把通过校验的 JSON 保存为 `smoke/receipts/<case-id>.json` 并提交。普通 PR

@@ -15,6 +15,10 @@
 
 - macOS smoke harness 通过 POSIX 安全运行层统一固定的 `/var`、`/tmp` 系统别名，
   避免长转写崩溃续跑因临时目录与 chunk manifest 路径拼写不同而误判失败。
+- X 的两条发布证据现在分工明确：`twitter-anonymous` 验证真实 `yt-dlp`
+  自然直连；`twitter-gallery-fallback` 使用已披露的单次受控网络错误，通过
+  未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性，不再
+  把受控路径表述为平台自然失败。
 
 ### Security
 
@@ -22,6 +26,9 @@
   self-hosted runner 不执行 fork/PR ref，receipt 仅在独立通过 schema、
   current digest、case、单文件、脱敏和 outcome 复验后上传，每次 attempt
   使用唯一目录隔离历史结果。
+- 下载 smoke URL 必须匹配 registry 中预登记的规范化 SHA-256 指纹；受控 X
+  fallback 只允许固定 fault profile，不接受任意故障命令、可执行路径或
+  workflow 输入。
 
 ## [0.1.0] - 2026-07-28
 

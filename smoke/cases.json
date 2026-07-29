@@ -1,11 +1,12 @@
 {
-  "schema_version": "awesome-capture.smoke-cases/v1",
+  "schema_version": "awesome-capture.smoke-cases/v2",
   "cases": [
     {
       "case_id": "bilibili-anonymous",
       "suite": "download",
       "platform": "bilibili",
       "source_env": "AWESOME_CAPTURE_SMOKE_BILIBILI_URL",
+      "source_fingerprint": "036d8ae343642d346f08695e683ca3a71c9c67faac104eacb46e2534dc7068c6",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
     },
     {
@@ -13,6 +14,7 @@
       "suite": "download",
       "platform": "youtube",
       "source_env": "AWESOME_CAPTURE_SMOKE_YOUTUBE_URL",
+      "source_fingerprint": "41056884ffb08d869d53c54933c31dce7df1b1567a780face2bb065d9d62dae1",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "deno", "yt-dlp-ejs"]
     },
     {
@@ -20,6 +22,7 @@
       "suite": "download",
       "platform": "twitter",
       "source_env": "AWESOME_CAPTURE_SMOKE_TWITTER_URL",
+      "source_fingerprint": "c9e82ab94b43c581587b46b1325cae68eabab79fed0f709ba6d290605385a5a7",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp"]
     },
     {
@@ -27,6 +30,7 @@
       "suite": "download",
       "platform": "douyin",
       "source_env": "AWESOME_CAPTURE_SMOKE_DOUYIN_BROWSER_URL",
+      "source_fingerprint": "cdb1427c3b3852c55d702eb314a15ea72bab6df1cc7a3500b7bb0e6b4c6b18bd",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "playwright", "chromium"],
       "expectation": "ephemeral_browser"
     },
@@ -35,6 +39,7 @@
       "suite": "download",
       "platform": "tiktok",
       "source_env": "AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL",
+      "source_fingerprint": "ece40e87815163ac2fa27acc7fbb53ce2f10b25b19e9c42e9655fa5fb30c0095",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
       "expectation": "gallery-dl"
     },
@@ -43,8 +48,10 @@
       "suite": "download",
       "platform": "twitter",
       "source_env": "AWESOME_CAPTURE_SMOKE_TWITTER_GALLERY_URL",
-      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl"],
-      "expectation": "gallery-dl"
+      "source_fingerprint": "272c3cd8f41e281f00689741caf02f4ba2bb149d5b2d0644016c9d997221a7d1",
+      "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "gallery-dl", "awesome-capture-smoke-fault"],
+      "expectation": "gallery-dl",
+      "fault_profile": "x-first-ytdlp-network-error-v1"
     },
     {
       "case_id": "whisper-cpp-local",

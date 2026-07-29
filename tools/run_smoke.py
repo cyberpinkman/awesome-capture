@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
+import importlib.util
 import importlib.metadata
+import io
 import json
 import os
 import platform
@@ -51,11 +54,26 @@ from tools.smoke_receipts import (  # noqa: E402
 )
 
 
-CASES_SCHEMA = "awesome-capture.smoke-cases/v1"
+CASES_SCHEMA = "awesome-capture.smoke-cases/v2"
 RECEIPT_SCHEMA = "awesome-capture.smoke-receipt/v1"
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_NAME_PATTERN = re.compile(r"^AWESOME_CAPTURE_SMOKE_[A-Z0-9_]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+CONTROLLED_FAULT_PROFILE = "x-first-ytdlp-network-error-v1"
+CONTROLLED_FAULT_TOOL = "awesome-capture-smoke-fault"
+CONTROLLED_FAULT_WARNING = "controlled-ytdlp-network-error-injection"
+CONTROLLED_FAULT_VERSION = "x-first-ytdlp-network-error-v1"
+CONTROLLED_FAULT_ASSERTIONS = {
+    "controlled-fault-profile-applied",
+    "controlled-ytdlp-command-verified",
+    "controlled-ytdlp-network-error-observed",
+    "controlled-ytdlp-fault-triggered-exactly-once",
+    "controlled-production-fallback-gate-accepted",
+    "controlled-gallery-dl-command-verified",
+    "controlled-gallery-dl-executed-exactly-once",
+    "controlled-downloader-entrypoints-stable",
+    "controlled-fallback-fresh-output-observed",
+}
 PRIVATE_STRING_PATTERN = re.compile(
     r"(?:[a-z][a-z0-9+.-]*://|[/\\@]|"
     r"\b(?:host(?:name)?|user(?:name)?|login|cookie|authorization|"
@@ -84,25 +102,31 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
         raise SmokeError("INVALID_CASES", "Smoke cases schema is unsupported.")
     cases: list[dict[str, Any]] = []
     seen: set[str] = set()
-    common = {"case_id", "suite", "platform", "source_env"}
+    common = {"case_id", "suite", "platform", "source_env", "required_tools"}
     for raw in value["cases"]:
         if not isinstance(raw, dict):
             raise SmokeError("INVALID_CASES", "Every smoke case must be an object.")
         suite = raw.get("suite")
-        required = (
-            common
-            if suite == "download"
-            else common | {"engine", "model_env"} | ({"binary_env"} if raw.get("case_id") in {
+        if suite == "download":
+            required = common | {"source_fingerprint"}
+            allowed = required | {"expectation"}
+            if raw.get("case_id") == "twitter-gallery-fallback":
+                required |= {"fault_profile"}
+                allowed |= {"fault_profile"}
+        elif suite == "transcription":
+            required = common | {"engine", "model_env"}
+            if raw.get("case_id") in {
                 "whisper-cpp-local",
                 "whisper-cpp-cpu",
                 "whisper-cpp-gpu-fallback",
                 "external-local",
                 "external-long-resume",
-            } else set())
-            if suite == "transcription"
-            else set()
-        )
-        allowed = required | {"expectation", "required_tools"}
+            }:
+                required |= {"binary_env"}
+            allowed = required | {"expectation"}
+        else:
+            required = set()
+            allowed = set()
         if not required or not required.issubset(raw) or not set(raw).issubset(allowed):
             raise SmokeError("INVALID_CASES", "Smoke case fields are invalid.")
         if (
@@ -133,6 +157,21 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
                 raise SmokeError("INVALID_CASES", "Smoke environment reference is invalid.")
             if key in {"case_id", "suite", "platform"} and not isinstance(item, str):
                 raise SmokeError("INVALID_CASES", "Smoke case strings are invalid.")
+        source_fingerprint = raw.get("source_fingerprint")
+        if suite == "download":
+            if (
+                not isinstance(source_fingerprint, str)
+                or SHA_PATTERN.fullmatch(source_fingerprint) is None
+            ):
+                raise SmokeError(
+                    "INVALID_CASES",
+                    "Download smoke source fingerprint is invalid.",
+                )
+        elif source_fingerprint is not None:
+            raise SmokeError(
+                "INVALID_CASES",
+                "Only download smoke may register a source fingerprint.",
+            )
         expectation = raw.get("expectation")
         valid_expectations = (
             {"ephemeral_browser", "gallery-dl"}
@@ -141,13 +180,33 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
         )
         if expectation is not None and expectation not in valid_expectations:
             raise SmokeError("INVALID_CASES", "Smoke case expectation is invalid.")
+        fault_profile = raw.get("fault_profile")
+        if fault_profile is not None and (
+            fault_profile != CONTROLLED_FAULT_PROFILE
+            or raw.get("case_id") != "twitter-gallery-fallback"
+            or suite != "download"
+            or raw.get("platform") != "twitter"
+            or expectation != "gallery-dl"
+        ):
+            raise SmokeError(
+                "INVALID_CASES",
+                "Controlled smoke fault profile binding is invalid.",
+            )
+        if (
+            raw.get("case_id") == "twitter-gallery-fallback"
+            and fault_profile != CONTROLLED_FAULT_PROFILE
+        ):
+            raise SmokeError(
+                "INVALID_CASES",
+                "Twitter gallery fallback must declare its controlled fault profile.",
+            )
         required_tools = raw.get("required_tools")
         if (
             not isinstance(required_tools, list)
             or not required_tools
             or any(
                 not isinstance(item, str)
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+ -]{0,127}", item)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", item)
                 is None
                 for item in required_tools
             )
@@ -157,7 +216,25 @@ def _strict_cases(value: Any) -> list[dict[str, Any]]:
                 "INVALID_CASES",
                 "Smoke case required tools are invalid.",
             )
+        has_controlled_tool = CONTROLLED_FAULT_TOOL in required_tools
+        if has_controlled_tool != (
+            fault_profile == CONTROLLED_FAULT_PROFILE
+        ):
+            raise SmokeError(
+                "INVALID_CASES",
+                "Controlled smoke tool evidence binding is invalid.",
+            )
         cases.append(dict(raw))
+    download_fingerprints = [
+        case["source_fingerprint"]
+        for case in cases
+        if case["suite"] == "download"
+    ]
+    if len(download_fingerprints) != len(set(download_fingerprints)):
+        raise SmokeError(
+            "INVALID_CASES",
+            "Download smoke source fingerprints must be unique.",
+        )
     return cases
 
 
@@ -252,7 +329,7 @@ def collect_tools(extra: Sequence[dict[str, str]] = ()) -> list[dict[str, str]]:
         candidate_name = str(item.get("name") or "")[:128]
         name = (
             candidate_name
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+ -]{0,127}", candidate_name)
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", candidate_name)
             else "unknown-tool"
         )
         version = _safe_version(str(item.get("version") or ""))
@@ -337,7 +414,7 @@ def _detect_download_source(
     source: str,
     *,
     runner: Callable[..., subprocess.CompletedProcess[str]],
-) -> tuple[str, str, bool]:
+) -> tuple[str, str, str, bool]:
     return_code, payload, unused_error = _run_json(
         [sys.executable, str(DOWNLOAD_SCRIPT), "detect", source],
         runner=runner,
@@ -347,11 +424,19 @@ def _detect_download_source(
         return_code == 0
         and isinstance(payload, dict)
         and isinstance(payload.get("platform"), str)
+        and isinstance(payload.get("sanitized_url"), str)
         and isinstance(payload.get("source_fingerprint"), str)
         and SHA_PATTERN.fullmatch(payload["source_fingerprint"])
+        and hashlib.sha256(payload["sanitized_url"].encode("utf-8")).hexdigest()
+        == payload["source_fingerprint"]
     ):
-        return payload["platform"], payload["source_fingerprint"], True
-    return "", hashlib.sha256(source.encode("utf-8")).hexdigest(), False
+        return (
+            payload["platform"],
+            payload["sanitized_url"],
+            payload["source_fingerprint"],
+            True,
+        )
+    return "", "", hashlib.sha256(source.encode("utf-8")).hexdigest(), False
 
 
 def _reverify_video_media(
@@ -416,6 +501,473 @@ def _reverify_video_media(
         return False
 
 
+def _snapshot_controlled_tool(name: str) -> dict[str, Any]:
+    candidate = shutil.which(name)
+    if not candidate:
+        raise SmokeError(
+            "SMOKE_ENV_MISSING",
+            "A controlled fallback tool is unavailable.",
+            exit_code=3,
+        )
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        descriptor = os.open(
+            resolved,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+    except (OSError, RuntimeError) as exc:
+        raise SmokeError(
+            "UNSAFE_SMOKE_TOOL",
+            "A controlled fallback tool cannot be opened safely.",
+            exit_code=3,
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid not in {0, os.geteuid()}
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or (stat.S_IMODE(metadata.st_mode) & 0o111) == 0
+            or metadata.st_size <= 0
+        ):
+            raise SmokeError(
+                "UNSAFE_SMOKE_TOOL",
+                "A controlled fallback tool has an unsafe file identity.",
+                exit_code=3,
+            )
+        digest = hashlib.sha256()
+        prefix = b""
+        total = 0
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            if len(prefix) < 4096:
+                prefix += block[: 4096 - len(prefix)]
+            digest.update(block)
+            total += len(block)
+        if total != metadata.st_size:
+            raise SmokeError(
+                "UNSAFE_SMOKE_TOOL",
+                "A controlled fallback tool changed while it was read.",
+                exit_code=3,
+            )
+        first_line = prefix.splitlines()[0] if prefix else b""
+        if first_line.startswith(b"#!"):
+            try:
+                interpreter = first_line[2:].decode("utf-8").strip().split()[0]
+            except (UnicodeDecodeError, IndexError) as exc:
+                raise SmokeError(
+                    "UNSAFE_SMOKE_TOOL",
+                    "A controlled fallback tool has an invalid script entrypoint.",
+                    exit_code=3,
+                ) from exc
+            if not interpreter.startswith("/") or Path(interpreter).name == "env":
+                raise SmokeError(
+                    "UNSAFE_SMOKE_TOOL",
+                    "A controlled fallback tool must use an absolute interpreter.",
+                    exit_code=3,
+                )
+        return {
+            "name": name,
+            "path": resolved,
+            "device": metadata.st_dev,
+            "inode": metadata.st_ino,
+            "bytes": metadata.st_size,
+            "mode": stat.S_IMODE(metadata.st_mode),
+            "sha256": digest.hexdigest(),
+        }
+    finally:
+        os.close(descriptor)
+
+
+def _controlled_tool_unchanged(snapshot: Mapping[str, Any]) -> bool:
+    try:
+        current = _snapshot_controlled_tool(str(snapshot["name"]))
+    except SmokeError:
+        return False
+    return all(
+        current[key] == snapshot[key]
+        for key in ("path", "device", "inode", "bytes", "mode", "sha256")
+    )
+
+
+def _private_staging_directory(path: Path | None, *, output_dir: Path) -> bool:
+    if path is None or not path.is_absolute():
+        return False
+    expected_parent = (
+        output_dir
+        / ".awesome-capture-media"
+        / "v2"
+        / "staging"
+    )
+    try:
+        metadata = path.lstat()
+        path.relative_to(expected_parent)
+    except (OSError, ValueError):
+        return False
+    return (
+        path.parent == expected_parent
+        and stat.S_ISDIR(metadata.st_mode)
+        and not stat.S_ISLNK(metadata.st_mode)
+        and metadata.st_uid == os.geteuid()
+        and stat.S_IMODE(metadata.st_mode) == 0o700
+    )
+
+
+def _controlled_ytdlp_command_valid(
+    command: Sequence[str],
+    *,
+    source: str,
+    output_dir: Path,
+    executable: Path,
+    pinned_cwd: Path | None,
+) -> bool:
+    expected = [
+        str(executable),
+        "--ignore-config",
+        "--no-playlist",
+        "--use-extractors",
+        "Twitter",
+        "--socket-timeout",
+        "20",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--no-warnings",
+        "--part",
+        "--no-overwrites",
+        "--write-info-json",
+        "--format",
+        "bv*+ba/b",
+        "--paths",
+        "temp:.",
+        "--output",
+        "%(id)s--%(title).120B.%(ext)s",
+        "--print",
+        "after_move:%(filepath)j",
+        source,
+    ]
+    return (
+        list(command) == expected
+        and _private_staging_directory(pinned_cwd, output_dir=output_dir)
+    )
+
+
+def _controlled_gallery_command_valid(
+    command: Sequence[str],
+    *,
+    source: str,
+    output_dir: Path,
+    executable: Path,
+    pinned_cwd: Path | None,
+) -> bool:
+    expected = [
+        str(executable),
+        "--config-ignore",
+        "--no-input",
+        "--range",
+        "1",
+        "-D",
+        ".",
+        "-f",
+        "download.{extension}",
+        source,
+    ]
+    return (
+        list(command) == expected
+        and _private_staging_directory(pinned_cwd, output_dir=output_dir)
+    )
+
+
+def _load_controlled_download_module() -> Any:
+    module_name = f"_awesome_capture_controlled_download_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(module_name, DOWNLOAD_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise SmokeError(
+            "SMOKE_HARNESS_FAILED",
+            "The controlled fallback production module cannot be loaded.",
+            exit_code=3,
+        )
+    module = importlib.util.module_from_spec(spec)
+    original_sys_path = list(sys.path)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise SmokeError(
+            "SMOKE_HARNESS_FAILED",
+            "The controlled fallback production module cannot be loaded.",
+            exit_code=3,
+        ) from exc
+    finally:
+        sys.path[:] = original_sys_path
+    try:
+        local_digest = module.contract_digest()
+    except Exception as exc:
+        raise SmokeError(
+            "CONTRACT_BUILD_MISMATCH",
+            "The controlled fallback contract bundle is invalid.",
+            exit_code=7,
+        ) from exc
+    if (
+        module.CONTRACT_BUNDLE_ERROR is not None
+        or local_digest != module.CONTRACT_DIGEST
+    ):
+        raise SmokeError(
+            "CONTRACT_BUILD_MISMATCH",
+            "The controlled fallback contract bundle is invalid.",
+            exit_code=7,
+        )
+    return module
+
+
+def _controlled_fallback_runner(
+    *,
+    source: str,
+    output_dir: Path,
+    state: dict[str, Any],
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    yt_dlp = _snapshot_controlled_tool("yt-dlp")
+    gallery_dl = _snapshot_controlled_tool("gallery-dl")
+    download_script_sha256 = _sha256_file(DOWNLOAD_SCRIPT)
+    module = _load_controlled_download_module()
+    original_require_tool = module.require_tool
+    original_run_checked = module.run_checked
+    original_run_process_raw = module.run_process_raw
+    original_can_gallery_fallback = module.can_gallery_fallback
+    original_json_print = module.json_print
+    expected_command = [
+        sys.executable,
+        str(DOWNLOAD_SCRIPT),
+        "download",
+        source,
+        "--output-dir",
+        str(output_dir),
+        "--lock-timeout",
+        "30",
+    ]
+    invocation_count = 0
+
+    def fixed_require_tool(name: str) -> str:
+        if name == "yt-dlp":
+            return str(yt_dlp["path"])
+        if name == "gallery-dl":
+            return str(gallery_dl["path"])
+        return original_require_tool(name)
+
+    def controlled_run_checked(
+        command: list[str],
+        *,
+        timeout: int,
+        pinned_cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        state["fault_trigger_count"] += 1
+        valid = (
+            state["fault_trigger_count"] == 1
+            and timeout == 900
+            and _controlled_ytdlp_command_valid(
+                command,
+                source=source,
+                output_dir=output_dir,
+                executable=yt_dlp["path"],
+                pinned_cwd=pinned_cwd,
+            )
+        )
+        state["yt_dlp_command_verified"] = valid
+        if not valid:
+            raise SmokeError(
+                "CONTROLLED_FAULT_MISMATCH",
+                "The production yt-dlp boundary did not match the registered fault.",
+                exit_code=7,
+            )
+        error = module.classify_ytdlp_error(
+            "failed to resolve controlled smoke fault"
+        )
+        state["network_error_observed"] = error.code == "NETWORK_ERROR"
+        if not state["network_error_observed"]:
+            raise SmokeError(
+                "CONTROLLED_FAULT_MISMATCH",
+                "The registered fault no longer maps to a recoverable network error.",
+                exit_code=7,
+            )
+        raise error
+
+    def observed_can_gallery_fallback(
+        args: argparse.Namespace,
+        platform_name: str,
+        error: Any,
+    ) -> bool:
+        state["fallback_gate_count"] += 1
+        accepted = original_can_gallery_fallback(args, platform_name, error)
+        state["fallback_gate_accepted"] = (
+            state["fallback_gate_count"] == 1
+            and platform_name == "twitter"
+            and getattr(error, "code", None) == "NETWORK_ERROR"
+            and accepted is True
+        )
+        return accepted
+
+    def controlled_run_process_raw(
+        command: list[str],
+        *,
+        timeout: int,
+        pinned_cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        state["gallery_execution_count"] += 1
+        valid = (
+            state["gallery_execution_count"] == 1
+            and timeout == 900
+            and _controlled_gallery_command_valid(
+                command,
+                source=source,
+                output_dir=output_dir,
+                executable=gallery_dl["path"],
+                pinned_cwd=pinned_cwd,
+            )
+        )
+        state["gallery_command_verified"] = valid
+        if not valid:
+            raise SmokeError(
+                "CONTROLLED_FAULT_MISMATCH",
+                "The production gallery-dl boundary did not match the registered fault.",
+                exit_code=7,
+            )
+        return original_run_process_raw(
+            command,
+            timeout=timeout,
+            pinned_cwd=pinned_cwd,
+        )
+
+    def dynamic_json_print(value: Any, *, stream: Any | None = None) -> None:
+        # The imported production helper bound sys.stdout as a default argument.
+        # Pass the redirected stream explicitly so in-process execution preserves
+        # the one-object CLI protocol without exposing URLs or private paths.
+        original_json_print(
+            value,
+            stream=sys.stdout if stream is None else stream,
+        )
+
+    def runner(
+        command: Sequence[str],
+        **unused: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal invocation_count
+        invocation_count += 1
+        state["fault_profile_applied"] = True
+        if invocation_count != 1 or list(command) != expected_command:
+            raise SmokeError(
+                "CONTROLLED_FAULT_MISMATCH",
+                "The controlled fallback command is not the registered command.",
+                exit_code=7,
+            )
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        module.require_tool = fixed_require_tool
+        module.run_checked = controlled_run_checked
+        module.run_process_raw = controlled_run_process_raw
+        module.can_gallery_fallback = observed_can_gallery_fallback
+        module.json_print = dynamic_json_print
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                return_code = module.main(expected_command[2:])
+        finally:
+            module.require_tool = original_require_tool
+            module.run_checked = original_run_checked
+            module.run_process_raw = original_run_process_raw
+            module.can_gallery_fallback = original_can_gallery_fallback
+            module.json_print = original_json_print
+            state["tool_identities_stable"] = (
+                _controlled_tool_unchanged(yt_dlp)
+                and _controlled_tool_unchanged(gallery_dl)
+                and _sha256_file(DOWNLOAD_SCRIPT) == download_script_sha256
+            )
+        return subprocess.CompletedProcess(
+            list(command),
+            return_code,
+            stdout=stdout.getvalue(),
+            stderr=stderr.getvalue(),
+        )
+
+    return runner
+
+
+def _controlled_fault_assertion_rows(
+    *,
+    case: Mapping[str, Any],
+    state: Mapping[str, Any],
+    artifact: Mapping[str, Any] | None,
+    artifact_path: Path,
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    if case.get("fault_profile") != CONTROLLED_FAULT_PROFILE:
+        return []
+    expected_warning = (
+        "yt-dlp failed with NETWORK_ERROR; used the bounded gallery-dl fallback."
+    )
+    artifact_warnings = (
+        artifact.get("acquisition", {}).get("warnings", [])
+        if isinstance(artifact, Mapping)
+        and isinstance(artifact.get("acquisition"), Mapping)
+        else []
+    )
+    try:
+        inside_fresh_output = (
+            artifact_path.is_absolute()
+            and artifact_path.is_file()
+            and artifact_path.is_relative_to(output_dir)
+        )
+    except OSError:
+        inside_fresh_output = False
+    fresh_output_observed = (
+        inside_fresh_output
+        and isinstance(artifact, Mapping)
+        and isinstance(artifact.get("producer"), Mapping)
+        and artifact["producer"].get("tool") == "gallery-dl"
+        and isinstance(artifact.get("source"), Mapping)
+        and artifact["source"].get("fingerprint") == case["source_fingerprint"]
+        and isinstance(artifact.get("acquisition"), Mapping)
+        and artifact["acquisition"].get("auth_mode") == "anonymous"
+        and artifact["acquisition"].get("fallback") == "gallery-dl"
+    )
+    values = {
+        "controlled-fault-profile-applied": (
+            state.get("fault_profile_applied") is True
+        ),
+        "controlled-ytdlp-command-verified": (
+            state.get("yt_dlp_command_verified") is True
+        ),
+        "controlled-ytdlp-network-error-observed": (
+            state.get("network_error_observed") is True
+            and expected_warning in artifact_warnings
+        ),
+        "controlled-ytdlp-fault-triggered-exactly-once": (
+            state.get("fault_trigger_count") == 1
+        ),
+        "controlled-production-fallback-gate-accepted": (
+            state.get("fallback_gate_count") == 1
+            and state.get("fallback_gate_accepted") is True
+        ),
+        "controlled-gallery-dl-command-verified": (
+            state.get("gallery_command_verified") is True
+        ),
+        "controlled-gallery-dl-executed-exactly-once": (
+            state.get("gallery_execution_count") == 1
+        ),
+        "controlled-downloader-entrypoints-stable": (
+            state.get("tool_identities_stable") is True
+        ),
+        "controlled-fallback-fresh-output-observed": fresh_output_observed,
+    }
+    if set(values) != CONTROLLED_FAULT_ASSERTIONS:
+        raise AssertionError("controlled fault assertion registry drifted")
+    return [
+        {"name": name, "passed": values[name]}
+        for name in sorted(values)
+    ]
+
+
 def _download_case(
     case: Mapping[str, Any],
     source: str,
@@ -423,16 +975,32 @@ def _download_case(
     *,
     runner: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
-    detected_platform, fingerprint, detected = _detect_download_source(
+    detected_platform, sanitized_source, fingerprint, detected = _detect_download_source(
         source, runner=runner
     )
+    registered_fingerprint = fingerprint == case["source_fingerprint"]
+    canonical_source = bool(sanitized_source) and source == sanitized_source
     assertions = [
         {"name": "registered-source-detected", "passed": detected},
         {
             "name": "registered-platform-matches",
             "passed": detected_platform == case["platform"],
         },
+        {
+            "name": "registered-source-fingerprint-matches",
+            "passed": registered_fingerprint,
+        },
+        {
+            "name": "registered-source-is-canonical",
+            "passed": canonical_source,
+        },
     ]
+    fault_profile = case.get("fault_profile")
+    fault_tool = (
+        [{"name": CONTROLLED_FAULT_TOOL, "version": CONTROLLED_FAULT_VERSION}]
+        if fault_profile == CONTROLLED_FAULT_PROFILE
+        else []
+    )
     base = {
         "source": {
             "platform": case["platform"],
@@ -449,23 +1017,97 @@ def _download_case(
         ),
     }
     if not all(assertion["passed"] for assertion in assertions):
-        base["warnings"].append("registered-source-detection-failed")
+        if not detected:
+            warning = "registered-source-detection-failed"
+        elif detected_platform != case["platform"]:
+            warning = "registered-platform-mismatch"
+        elif not registered_fingerprint:
+            warning = "registered-source-fingerprint-mismatch"
+        else:
+            warning = "registered-source-not-canonical"
+        base["warnings"].append(warning)
         return base
-    return_code, payload, error_code = _run_json(
-        [
-            sys.executable,
-            str(DOWNLOAD_SCRIPT),
-            "download",
-            source,
-            "--output-dir",
-            str(work_dir / "download"),
-            "--lock-timeout",
-            "30",
-        ],
-        runner=runner,
-    )
+    if fault_profile == CONTROLLED_FAULT_PROFILE:
+        base["warnings"].append(CONTROLLED_FAULT_WARNING)
+        base["tools"] = collect_tools(
+            [
+                _tool_version("yt-dlp", ("yt-dlp", "--version")),
+                *fault_tool,
+            ]
+        )
+    output_dir = work_dir / "download"
+    fault_state: dict[str, Any] = {
+        "fault_profile_applied": False,
+        "fault_trigger_count": 0,
+        "yt_dlp_command_verified": False,
+        "network_error_observed": False,
+        "fallback_gate_count": 0,
+        "fallback_gate_accepted": False,
+        "gallery_execution_count": 0,
+        "gallery_command_verified": False,
+        "tool_identities_stable": False,
+    }
+    download_runner = runner
+    if fault_profile == CONTROLLED_FAULT_PROFILE:
+        try:
+            download_runner = _controlled_fallback_runner(
+                source=source,
+                output_dir=output_dir,
+                state=fault_state,
+            )
+        except SmokeError as exc:
+            assertions.extend(
+                _controlled_fault_assertion_rows(
+                    case=case,
+                    state=fault_state,
+                    artifact=None,
+                    artifact_path=Path(),
+                    output_dir=output_dir,
+                )
+            )
+            base["warnings"].append(
+                f"controlled-fallback-error-{exc.code.lower()}"
+            )
+            return base
+    try:
+        return_code, payload, error_code = _run_json(
+            [
+                sys.executable,
+                str(DOWNLOAD_SCRIPT),
+                "download",
+                source,
+                "--output-dir",
+                str(output_dir),
+                "--lock-timeout",
+                "30",
+            ],
+            runner=download_runner,
+        )
+    except SmokeError as exc:
+        assertions.extend(
+            _controlled_fault_assertion_rows(
+                case=case,
+                state=fault_state,
+                artifact=None,
+                artifact_path=Path(),
+                output_dir=output_dir,
+            )
+        )
+        base["warnings"].append(
+            f"controlled-fallback-error-{exc.code.lower()}"
+        )
+        return base
     assertions.append({"name": "download-command-succeeded", "passed": return_code == 0})
     if return_code != 0 or not isinstance(payload, dict):
+        assertions.extend(
+            _controlled_fault_assertion_rows(
+                case=case,
+                state=fault_state,
+                artifact=None,
+                artifact_path=Path(),
+                output_dir=output_dir,
+            )
+        )
         base["warnings"].append(f"download-error-{error_code.lower()}")
         return base
     try:
@@ -522,12 +1164,22 @@ def _download_case(
                     _chromium_tool_version(),
                 ]
             )
+        route_tools.extend(fault_tool)
         base["tools"] = collect_tools(
             route_tools
         )
         warning_count = len(artifact["acquisition"]["warnings"])
         if warning_count:
             base["warnings"].append(f"download-reported-{warning_count}-warnings")
+    assertions.extend(
+        _controlled_fault_assertion_rows(
+            case=case,
+            state=fault_state,
+            artifact=artifact if isinstance(artifact, dict) else None,
+            artifact_path=artifact_path,
+            output_dir=output_dir,
+        )
+    )
     expectation = case.get("expectation")
     if expectation is None:
         observed = (
@@ -546,8 +1198,15 @@ def _download_case(
             isinstance(artifact, dict)
             and artifact["acquisition"]["fallback"] == expectation
             and (
-                expectation != "ephemeral_browser"
-                or artifact["acquisition"]["auth_mode"] == "ephemeral_browser"
+                (
+                    expectation == "ephemeral_browser"
+                    and artifact["acquisition"]["auth_mode"] == "ephemeral_browser"
+                )
+                or (
+                    expectation == "gallery-dl"
+                    and artifact["acquisition"]["auth_mode"] == "anonymous"
+                    and artifact["producer"]["tool"] == "gallery-dl"
+                )
             )
         )
         assertions.append(

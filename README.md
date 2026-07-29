@@ -396,6 +396,8 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
   GitHub workflow 只接受原仓库默认分支，并绑定
   `awesome-capture-smoke` Environment；维护者必须在仓库设置中配置
   required reviewers 后才可把它作为受控发布环境。下载 case 使用公开样本；
+  每个样本都绑定 registry 中预登记的脱敏 URL SHA-256 指纹，harness 会在联网
+  下载前复验规范化 URL 与指纹；
   ASR case 只在受保护 runner 上使用预置本地模型，不在工作流中下载模型或
   接收任意 URL、Cookie 和浏览器路径。receipt 通过独立的 schema、digest、
   case、单文件、脱敏和 outcome 复验后才上传；每次 workflow attempt 使用
@@ -403,8 +405,15 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
 
 当前下载发布证据覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
 匿名下载，Douyin 隔离临时浏览器，以及 TikTok/X 的 gallery fallback。
-fallback case 本身先执行匿名尝试，再验证实际回退路径；不把当前必须回退的
-平台重复登记为无法满足的“匿名直连”发布门槛。
+其中 `twitter-anonymous` 使用真实 `yt-dlp` 直连，证明 X 的自然匿名路径；
+`twitter-gallery-fallback` 则对另一份固定公开样本使用已登记并在 receipt
+中披露的单次 `yt-dlp` `NETWORK_ERROR`，随后由未修改的生产 fallback gate
+选择真实 `gallery-dl` 完成获取。后者是回退韧性证据，不表示 X 在该次运行中
+自然失败。TikTok case 仍验证实际观察到的自然 gallery fallback。
+
+该受控故障不是通用测试后门：workflow 只接收 case alias，registry 只允许
+固定 fault profile；不存在可由调用者提供的故障命令、可执行路径或 workflow
+输入。
 
 离线测试证明契约、安全边界、故障恢复和幂等行为，不证明外部平台或具体
 ASR/硬件组合当前可用。对外发布受影响的平台或引擎时，应生成
@@ -429,8 +438,10 @@ git diff --check
 手动 workflow 同源的 harness。可运行 `python3 tools/smoke_receipts.py digest`
 计算实现身份，并用
 `validate ... --require-pass --require-current-digest`
-校验生成的脱敏 receipt。`smoke/cases.json` 只登记 case alias 和环境变量名；
-receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有绝对路径。
+校验生成的脱敏 receipt。`smoke/cases.json` 登记 case alias、证据要求、秘密
+环境变量名和下载样本的脱敏 SHA-256 指纹，但不保存原始 URL；受控 X fallback
+还固定登记唯一 fault profile。receipt 禁止原始 URL、Cookie、token、媒体
+内容、transcript 和私有绝对路径。
 
 正式 smoke receipt 也只证明其记录的 commit、implementation digest、工具版本和公开样本上的链路可运行，不证明所有账号、地区、网络或未来平台版本都可用。
 
