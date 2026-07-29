@@ -16,10 +16,11 @@
 ## 1. Five-minute Reading Order
 
 1. 完整阅读本文件。
-2. 浏览 `README.md` 的“四个 Skills”“Agent 层与脚本层”“文件契约”。
-3. 根据任务路由，完整阅读目标 `skills/<name>/SKILL.md`。
-4. 只读取该 `SKILL.md` 针对当前情形明确引用的 references。
-5. 在执行外部工具或写文件前，先运行对应的 `doctor`、`inspect`、`validate` 或 `plan`。
+2. 修改仓库代码、文档或 CI 时，完整阅读 `CONTRIBUTING.md`。
+3. 浏览 `README.md` 的“四个 Skills”“Agent 层与脚本层”“文件契约”。
+4. 根据任务路由，完整阅读目标 `skills/<name>/SKILL.md`。
+5. 只读取该 `SKILL.md` 针对当前情形明确引用的 references。
+6. 在执行外部工具或写文件前，先运行对应的 `doctor`、`inspect`、`validate` 或 `plan`。
 
 `SKILL.md` 是行为规范；`scripts/` 是确定性执行层；`references/` 是按需加载的深入规则。不要只看脚本名猜测完整工作流。
 
@@ -134,6 +135,22 @@ Canonical schemas、stdlib validator、POSIX runtime 和 fixtures 位于根目�
 ## 5. Repository-root Commands
 
 所有命令默认从仓库根目录运行。
+
+### Pull Request governance
+
+普通代码、契约、文档和 CI 变更必须从独立分支通过 PR 合并；不得把直接 push
+到 `main` 当作默认工作流。PR 使用 `.github/PULL_REQUEST_TEMPLATE.md`，
+完整标题、证据矩阵、CI 失败处理和合并规则见 `CONTRIBUTING.md`。
+
+任一 required check 失败、取消或仍在运行时不得合并。不得反复 rerun 直到
+偶然变绿；应记录首次失败 run/job/step、区分实现/测试/基础设施根因，并以
+最终 head SHA 的完整矩阵证明修复。外部平台或 ASR 变化仍须提供受控真实
+smoke 证据，不能把普通 PR 的离线绿灯当作发布证据。
+
+持久 self-hosted smoke runner 不执行 fork、PR ref 或任意功能分支代码。
+GitHub smoke 只从原仓库默认分支进入 `awesome-capture-smoke` Environment；
+功能分支需要真实验证时使用同源本地 harness 或一次性隔离 runner。receipt
+必须在上传前独立通过 schema、current digest、脱敏和 outcome 复验。
 
 ### Release metadata
 

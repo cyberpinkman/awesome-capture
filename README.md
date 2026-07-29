@@ -35,8 +35,9 @@
 [GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)；
 `main` 是开发分支，可能包含尚未发布或破坏兼容性的变化。
 
-[更新记录](CHANGELOG.md) · [版本策略](VERSIONING.md) ·
-[发布流程](RELEASING.md) · [安全策略](SECURITY.md)
+[贡献指南](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) ·
+[版本策略](VERSIONING.md) · [发布流程](RELEASING.md) ·
+[安全策略](SECURITY.md)
 
 ## 给本地 Agent 的快速指引
 
@@ -392,8 +393,13 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
   ffmpeg/ffprobe、canonical/vendored contract 一致性、JSON Schema、完整测试图、
   repository hygiene 和 `git diff --check`。
 - `.github/workflows/smoke.yml` 提供只接受预登记 case alias 的手动真实 smoke。
-  下载 case 使用公开样本；ASR case 只在受保护 runner 上使用预置本地模型，
-  不在工作流中下载模型或接收任意 URL、Cookie 和浏览器路径。
+  GitHub workflow 只接受原仓库默认分支，并绑定
+  `awesome-capture-smoke` Environment；维护者必须在仓库设置中配置
+  required reviewers 后才可把它作为受控发布环境。下载 case 使用公开样本；
+  ASR case 只在受保护 runner 上使用预置本地模型，不在工作流中下载模型或
+  接收任意 URL、Cookie 和浏览器路径。receipt 通过独立的 schema、digest、
+  case、单文件、脱敏和 outcome 复验后才上传；每次 workflow attempt 使用
+  唯一 receipt 目录。
 
 当前下载发布证据覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
 匿名下载，Douyin 隔离临时浏览器，以及 TikTok/X 的 gallery fallback。
@@ -432,12 +438,15 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 
 ```text
 .
-├── .github/workflows/
-│   ├── tests.yml
-│   ├── smoke.yml
-│   └── release.yml
+├── .github/
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── workflows/
+│       ├── tests.yml
+│       ├── smoke.yml
+│       └── release.yml
 ├── AGENTS.md
 ├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── contracts/          # canonical schemas、runtime、fixtures 与 manifest
 ├── LICENSE
 ├── README.md
@@ -489,6 +498,11 @@ receipt 禁止原始 URL、Cookie、token、媒体内容、transcript 和私有�
 7. 不把平台登录绕过、远程上传或知识库写入作为隐式副作用。
 
 ## 贡献
+
+所有普通改动都应从独立分支通过 Pull Request 合并，不把直接 push 到
+`main` 当作正常工作流。PR 的标题、证据矩阵、CI 失败处理、安全公开边界和
+合并规则见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；提交时请使用仓库提供的
+[PR 模板](.github/PULL_REQUEST_TEMPLATE.md)。
 
 面向使用者的变化应先写入
 [`CHANGELOG.md`](CHANGELOG.md) 的 `[Unreleased]`；版本升级规则、breaking

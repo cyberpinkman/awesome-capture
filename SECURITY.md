@@ -74,3 +74,10 @@ python3 tools/sync_vendored.py --check
 ## CI 与公开验证
 
 普通 PR CI 是离线门禁：校验 canonical/vendored contract 一致性，并通过 `tools/run_tests.py --fail-on-skip` 禁止 skip 和 unexpected success。真实平台 smoke 由受控环境手动执行，结果以脱敏 receipt 作为发布证据，而不是把 Cookie、模型或媒体上传到 CI。
+
+GitHub 的手动 smoke 只允许原仓库默认分支执行，并绑定
+`awesome-capture-smoke` Environment；维护者必须为该 Environment 配置人工
+审批。持久 self-hosted runner 不执行 fork、PR ref 或任意功能分支代码。
+receipt 只有在独立通过 schema、current implementation digest、脱敏和
+outcome 复验后才可上传；每次 attempt 使用唯一目录，并要求恰好一个与所选
+case 匹配的 receipt。validator 自身失败时不得上传生成的 JSON。

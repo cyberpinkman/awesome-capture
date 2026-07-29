@@ -79,6 +79,26 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertLess(macos.index(macos_install), macos.index(preflight))
         self.assertEqual(workflow.count("--github-annotations"), 2)
 
+    def test_required_check_aggregates_the_complete_matrix(self) -> None:
+        workflow = (ROOT / ".github/workflows/tests.yml").read_text(
+            encoding="utf-8"
+        )
+        required = workflow.split("  required:", 1)[1]
+
+        self.assertIn("if: ${{ always() }}", required)
+        self.assertIn("needs:\n      - linux\n      - macos-posix", required)
+        self.assertIn("LINUX_RESULT: ${{ needs.linux.result }}", required)
+        self.assertIn(
+            "MACOS_RESULT: ${{ needs.macos-posix.result }}",
+            required,
+        )
+        self.assertIn(
+            'if [ "$LINUX_RESULT" != "success" ] || '
+            '[ "$MACOS_RESULT" != "success" ]; then',
+            required,
+        )
+        self.assertIn("exit 1", required)
+
     def test_all_remote_actions_are_pinned_by_sha_with_version_comments(
         self,
     ) -> None:
@@ -250,6 +270,94 @@ class CiWorkflowTests(unittest.TestCase):
             public_download.index(install),
             public_download.index(preflight),
         )
+
+    def test_manual_smoke_is_trusted_ref_gated_and_uploads_only_valid_receipts(
+        self,
+    ) -> None:
+        workflow = (ROOT / ".github/workflows/smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        authorize, smoke_jobs = workflow.split("  public-download:", 1)
+        jobs = smoke_jobs.split("  local-posix-asr:", 1)
+        public_download = jobs[0]
+        local_posix, local_mlx = jobs[1].split("  local-mlx-asr:", 1)
+        sections = (public_download, local_posix, local_mlx)
+
+        self.assertIn(
+            "Require an original-repository default-branch dispatch",
+            authorize,
+        )
+        self.assertIn("runs-on: ubuntu-24.04", authorize)
+        self.assertNotIn("self-hosted", authorize)
+        self.assertIn('if [ "$REPOSITORY_IS_FORK" = "true" ]; then', authorize)
+        self.assertIn(
+            'if [ "$DISPATCH_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then',
+            authorize,
+        )
+        self.assertEqual(workflow.count("needs: authorize"), 3)
+        self.assertEqual(
+            workflow.count("environment: awesome-capture-smoke"),
+            3,
+        )
+        self.assertEqual(workflow.count("ref: ${{ github.sha }}"), 3)
+        self.assertEqual(workflow.count("persist-credentials: false"), 3)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("if: ${{ always() }}", workflow)
+        self.assertEqual(workflow.count("if: ${{ !cancelled() }}"), 3)
+
+        validation = (
+            "- name: Validate receipt schema, digest, redaction, and outcome"
+        )
+        upload = "- name: Upload validated sanitized receipt"
+        guarded_upload = (
+            "if: ${{ !cancelled() && "
+            "steps.validate_receipt.outcome == 'success' }}"
+        )
+        receipt_path = (
+            "path: ${{ runner.temp }}/awesome-capture-smoke-receipts/"
+            "${{ github.run_id }}-${{ github.run_attempt }}-"
+            "${{ github.job }}/*.json"
+        )
+        self.assertEqual(workflow.count(validation), 3)
+        self.assertEqual(workflow.count(upload), 3)
+        self.assertEqual(workflow.count(receipt_path), 3)
+        self.assertEqual(
+            workflow.count(
+                "name: smoke-receipt-${{ inputs.case }}-"
+                "${{ github.run_id }}-${{ github.run_attempt }}"
+            ),
+            3,
+        )
+        self.assertEqual(workflow.count("--require-single"), 3)
+        self.assertEqual(
+            workflow.count('--require-case "$SMOKE_CASE"'),
+            3,
+        )
+        self.assertEqual(
+            workflow.count(
+                "${{ github.run_id }}-${{ github.run_attempt }}-"
+                "${{ github.job }}"
+            ),
+            9,
+        )
+        for section in sections:
+            with self.subTest(job=section.splitlines()[0].strip()):
+                self.assertIn(
+                    'tools/run_smoke.py run "$SMOKE_CASE"',
+                    section,
+                )
+                self.assertIn(validation, section)
+                self.assertIn("id: validate_receipt", section)
+                self.assertIn("--require-current-digest", section)
+                self.assertNotIn("--require-pass", section)
+                self.assertIn(upload, section)
+                self.assertIn(guarded_upload, section)
+                self.assertIn("if-no-files-found: error", section)
+                self.assertLess(
+                    section.index('tools/run_smoke.py run "$SMOKE_CASE"'),
+                    section.index(validation),
+                )
+                self.assertLess(section.index(validation), section.index(upload))
 
 
 if __name__ == "__main__":

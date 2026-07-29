@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- 建立公开 Pull Request 贡献规范、证据矩阵和 PR 模板，明确分支工作流、
+  contract/smoke/安全要求、CI 失败处理及最终 head SHA 合并门槛。
+
+### Security
+
+- 手动真实 smoke 仅允许原仓库默认分支进入受控 Environment；持久
+  self-hosted runner 不执行 fork/PR ref，receipt 仅在独立通过 schema、
+  current digest、case、单文件、脱敏和 outcome 复验后上传，每次 attempt
+  使用唯一目录隔离历史结果。
+
 ## [0.1.0] - 2026-07-28
 
 ### Added

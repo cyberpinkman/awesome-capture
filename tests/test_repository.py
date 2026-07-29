@@ -20,6 +20,7 @@ class RepositoryStructureTests(unittest.TestCase):
             "README.md",
             "AGENTS.md",
             "CHANGELOG.md",
+            "CONTRIBUTING.md",
             "LICENSE",
             "RELEASING.md",
             "SECURITY.md",
@@ -55,6 +56,65 @@ class RepositoryStructureTests(unittest.TestCase):
         for name in SKILLS:
             with self.subTest(skill=name):
                 self.assertIn(name, guide)
+
+    def test_pull_request_governance_is_public_and_complete(self):
+        contributing_path = ROOT / "CONTRIBUTING.md"
+        template_path = ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+        self.assertTrue(contributing_path.is_file())
+        self.assertTrue(template_path.is_file())
+
+        contributing = contributing_path.read_text(encoding="utf-8")
+        for heading in (
+            "## PR 工作流",
+            "## 变更证据矩阵",
+            "## 安全与公开仓库边界",
+            "## Review 与合并规则",
+        ):
+            with self.subTest(contributing_heading=heading):
+                self.assertIn(heading, contributing)
+
+        for required_text in (
+            "python3 tools/release.py check",
+            "python3 tools/sync_vendored.py --check",
+            "python3 tools/run_tests.py --fail-on-skip",
+            "python3 tools/check_repository_hygiene.py",
+            "git diff --check",
+            "不得通过反复 rerun",
+            "最终 head SHA",
+            "awesome-capture-smoke",
+            "self-hosted runner",
+            "CHANGELOG.md",
+            "VERSIONING.md",
+            "RELEASING.md",
+            "SECURITY.md",
+            "MIT License",
+        ):
+            with self.subTest(contributing_text=required_text):
+                self.assertIn(required_text, contributing)
+
+        template = template_path.read_text(encoding="utf-8")
+        for heading in (
+            "## 变更摘要",
+            "## 验证证据",
+            "## 真实 Smoke 证据",
+            "## 安全与公开性",
+            "## 提交前检查",
+        ):
+            with self.subTest(template_heading=heading):
+                self.assertIn(heading, template)
+        self.assertIn("CONTRIBUTING.md", template)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        releasing = (ROOT / "RELEASING.md").read_text(encoding="utf-8")
+        self.assertIn("[贡献指南](CONTRIBUTING.md)", readme)
+        self.assertIn("CONTRIBUTING.md", agents)
+        self.assertIn("CONTRIBUTING.md", releasing)
+
+        workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("pull_request:", workflow)
 
 
 if __name__ == "__main__":

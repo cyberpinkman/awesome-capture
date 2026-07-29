@@ -330,6 +330,8 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("receipts", nargs="+")
     validate_parser.add_argument("--require-pass", action="store_true")
     validate_parser.add_argument("--require-current-digest", action="store_true")
+    validate_parser.add_argument("--require-single", action="store_true")
+    validate_parser.add_argument("--require-case")
     existing_parser = subparsers.add_parser(
         "validate-existing",
         help="Validate tracked receipts when present; an empty directory is valid for PR CI.",
@@ -358,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
                 "implementation_digest": implementation_digest(paths),
             }
         elif args.command == "validate":
+            if args.require_single and len(args.receipts) != 1:
+                raise ContractError(
+                    "SMOKE_RECEIPT_SET_INVALID",
+                    "Exactly one smoke receipt is required.",
+                )
             receipts = [
                 validate_receipt(
                     Path(item),
@@ -366,6 +373,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for item in args.receipts
             ]
+            if args.require_case is not None and any(
+                receipt["case_id"] != args.require_case
+                for receipt in receipts
+            ):
+                raise ContractError(
+                    "SMOKE_CASE_MISMATCH",
+                    "Smoke receipt does not match the requested case.",
+                )
             result = {"status": "ok", "validated": receipts}
         else:
             directory = Path(args.directory)

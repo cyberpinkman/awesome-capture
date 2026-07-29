@@ -5,6 +5,8 @@
 
 ## 1. 准备版本
 
+0. 发行准备也必须通过符合 [`CONTRIBUTING.md`](CONTRIBUTING.md) 的独立
+   Pull Request 进入 `main`；不要直接在 `main` 上试错或修改版本。
 1. 根据 [`VERSIONING.md`](VERSIONING.md) 选择版本号。
 2. 将 [`CHANGELOG.md`](CHANGELOG.md) 中 `[Unreleased]` 的用户可见变化移动
    到 `## [X.Y.Z] - YYYY-MM-DD`，保留空的 `[Unreleased]`。

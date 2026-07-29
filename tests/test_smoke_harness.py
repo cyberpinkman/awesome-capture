@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -610,6 +611,80 @@ class SmokeHarnessTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(rejected_partial.stderr)["error"]["code"],
                 "SMOKE_EVIDENCE_MISSING",
+            )
+
+    def test_validate_cli_binds_one_receipt_to_the_requested_case(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = Path(smoke_receipts.__file__).resolve()
+            environment = dict(os.environ)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            receipt = self.registered_download_receipt()
+            receipt["implementation_digest"] = smoke_receipts.implementation_digest()
+            first = root / "first.json"
+            second = root / "second.json"
+            self.write_private_json(first, receipt)
+            self.write_private_json(second, receipt)
+
+            accepted = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    "--require-current-digest",
+                    "--require-single",
+                    "--require-case",
+                    "youtube-anonymous",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            wrong_case = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    "--require-single",
+                    "--require-case",
+                    "bilibili-anonymous",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(wrong_case.returncode, 2)
+            self.assertEqual(wrong_case.stdout, "")
+            self.assertEqual(
+                json.loads(wrong_case.stderr)["error"]["code"],
+                "SMOKE_CASE_MISMATCH",
+            )
+
+            multiple = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    str(second),
+                    "--require-single",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(multiple.returncode, 2)
+            self.assertEqual(multiple.stdout, "")
+            self.assertEqual(
+                json.loads(multiple.stderr)["error"]["code"],
+                "SMOKE_RECEIPT_SET_INVALID",
             )
 
     def test_release_coverage_requires_every_registered_case(self):
@@ -1426,6 +1501,8 @@ class SmokeHarnessTests(unittest.TestCase):
     def test_workflow_has_only_case_input_and_no_credentials(self):
         workflow = (ROOT / ".github/workflows/smoke.yml").read_text(encoding="utf-8")
         inputs = workflow.split("permissions:", 1)[0]
+        configured_cases = re.findall(r"(?m)^          - ([a-z0-9-]+)$", inputs)
+        registered_cases = [case["case_id"] for case in run_smoke.load_cases()]
         self.assertIn("case:", inputs)
         self.assertNotIn("url:", inputs.lower())
         self.assertNotIn("cookie", workflow.lower())
@@ -1434,8 +1511,7 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertNotIn("download model", workflow.lower())
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("tools/run_smoke.py run \"$SMOKE_CASE\"", workflow)
-        for case in run_smoke.load_cases():
-            self.assertIn(case["case_id"], workflow)
+        self.assertCountEqual(configured_cases, registered_cases)
 
 
 if __name__ == "__main__":

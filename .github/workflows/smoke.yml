@@ -29,10 +29,32 @@ env:
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require an original-repository default-branch dispatch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DISPATCH_REF: ${{ github.ref }}
+          REPOSITORY_IS_FORK: ${{ github.event.repository.fork }}
+        run: |
+          set -euo pipefail
+          if [ "$REPOSITORY_IS_FORK" = "true" ]; then
+            echo "::error title=Fork smoke denied::Use the local smoke harness for fork commits."
+            exit 1
+          fi
+          if [ "$DISPATCH_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error title=Untrusted smoke ref::GitHub smoke must be dispatched from the default branch."
+            exit 1
+          fi
+
   public-download:
+    needs: authorize
     if: ${{ contains(fromJSON('["bilibili-anonymous","youtube-anonymous","twitter-anonymous","douyin-ephemeral-browser","tiktok-gallery-fallback","twitter-gallery-fallback"]'), inputs.case) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: awesome-capture-smoke
     env:
       SMOKE_CASE: ${{ inputs.case }}
       AWESOME_CAPTURE_SMOKE_BILIBILI_URL: ${{ vars.AWESOME_CAPTURE_SMOKE_BILIBILI_URL }}
@@ -45,6 +67,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -97,29 +122,40 @@ jobs:
 
       - name: Run preregistered public smoke
         env:
-          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         run: |
           install -d -m 700 "$RECEIPT_DIR"
           python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
-          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
-            --require-pass --require-current-digest
 
-      - name: Upload sanitized receipt
-        if: ${{ always() }}
+      - name: Validate receipt schema, digest, redaction, and outcome
+        id: validate_receipt
+        if: ${{ !cancelled() }}
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        run: |
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-current-digest \
+            --require-single \
+            --require-case "$SMOKE_CASE"
+
+      - name: Upload validated sanitized receipt
+        if: ${{ !cancelled() && steps.validate_receipt.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
-          if-no-files-found: warn
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}/*.json
+          if-no-files-found: error
           retention-days: 30
 
   local-posix-asr:
+    needs: authorize
     if: ${{ contains(fromJSON('["whisper-cpp-local","whisper-cpp-cpu","whisper-cpp-gpu-fallback","faster-whisper-local","external-local","external-long-resume"]'), inputs.case) }}
     runs-on:
       - self-hosted
       - awesome-capture-smoke
       - linux
     timeout-minutes: 120
+    environment: awesome-capture-smoke
     env:
       SMOKE_CASE: ${{ inputs.case }}
       AWESOME_CAPTURE_SMOKE_MEDIA: ${{ vars.AWESOME_CAPTURE_SMOKE_MEDIA }}
@@ -134,6 +170,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -142,23 +181,33 @@ jobs:
 
       - name: Run preregistered local ASR smoke
         env:
-          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         run: |
           install -d -m 700 "$RECEIPT_DIR"
           python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
-          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
-            --require-pass --require-current-digest
 
-      - name: Upload sanitized receipt
-        if: ${{ always() }}
+      - name: Validate receipt schema, digest, redaction, and outcome
+        id: validate_receipt
+        if: ${{ !cancelled() }}
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        run: |
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-current-digest \
+            --require-single \
+            --require-case "$SMOKE_CASE"
+
+      - name: Upload validated sanitized receipt
+        if: ${{ !cancelled() && steps.validate_receipt.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
-          if-no-files-found: warn
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}/*.json
+          if-no-files-found: error
           retention-days: 30
 
   local-mlx-asr:
+    needs: authorize
     if: ${{ inputs.case == 'mlx-whisper-local' }}
     runs-on:
       - self-hosted
@@ -166,6 +215,7 @@ jobs:
       - macos
       - arm64
     timeout-minutes: 120
+    environment: awesome-capture-smoke
     env:
       SMOKE_CASE: ${{ inputs.case }}
       AWESOME_CAPTURE_SMOKE_MEDIA: ${{ vars.AWESOME_CAPTURE_SMOKE_MEDIA }}
@@ -174,6 +224,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -182,18 +235,27 @@ jobs:
 
       - name: Run preregistered local MLX smoke
         env:
-          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         run: |
           install -d -m 700 "$RECEIPT_DIR"
           python tools/run_smoke.py run "$SMOKE_CASE" --receipt-dir "$RECEIPT_DIR"
-          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
-            --require-pass --require-current-digest
 
-      - name: Upload sanitized receipt
-        if: ${{ always() }}
+      - name: Validate receipt schema, digest, redaction, and outcome
+        id: validate_receipt
+        if: ${{ !cancelled() }}
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        run: |
+          python tools/smoke_receipts.py validate "$RECEIPT_DIR"/*.json \
+            --require-current-digest \
+            --require-single \
+            --require-case "$SMOKE_CASE"
+
+      - name: Upload validated sanitized receipt
+        if: ${{ !cancelled() && steps.validate_receipt.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/*.json
-          if-no-files-found: warn
+          name: smoke-receipt-${{ inputs.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/awesome-capture-smoke-receipts/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}/*.json
+          if-no-files-found: error
           retention-days: 30

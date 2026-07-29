@@ -163,3 +163,22 @@ jobs:
           python tools/check_repository_hygiene.py
           git diff --check
           test -z "$(git status --porcelain)"
+
+  required:
+    if: ${{ always() }}
+    needs:
+      - linux
+      - macos-posix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the complete no-skip matrix
+        env:
+          LINUX_RESULT: ${{ needs.linux.result }}
+          MACOS_RESULT: ${{ needs.macos-posix.result }}
+        run: |
+          set -euo pipefail
+          if [ "$LINUX_RESULT" != "success" ] || [ "$MACOS_RESULT" != "success" ]; then
+            echo "::error title=Required CI failed::Every Linux and macOS matrix job must succeed."
+            exit 1
+          fi
