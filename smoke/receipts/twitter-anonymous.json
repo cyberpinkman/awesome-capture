@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "sha256": "876bb92de0612d879ad919647790f18a899ba54f2134c386e12e5f33dae0148a",
+      "sha256": "3e7dccead64aad76b3c189366c5c04ead36f6e7a42ec264ee627c467abf75f92",
       "type": "video-artifact"
     }
   ],
@@ -12,6 +12,14 @@
     },
     {
       "name": "registered-platform-matches",
+      "passed": true
+    },
+    {
+      "name": "registered-source-fingerprint-matches",
+      "passed": true
+    },
+    {
+      "name": "registered-source-is-canonical",
       "passed": true
     },
     {
@@ -36,21 +44,21 @@
     }
   ],
   "case_id": "twitter-anonymous",
-  "commit_sha": "13f6ba1e8fadba54ac59cb89fe356c0f2e441b5e",
-  "created_at": "2026-07-28T13:23:41+00:00",
+  "commit_sha": "47422cc7402c24de5639700ebf0e5c82b895efcd",
+  "created_at": "2026-07-29T17:04:56+00:00",
   "engine": null,
   "environment": {
     "arch": "arm64",
     "os": "macos",
     "python": "3.14.6"
   },
-  "implementation_digest": "a8ffd6e7eddef7f89e847336e5bc669a9c93b7f51ec35d7f85e1ba32a096ecaf",
+  "implementation_digest": "7cc24980ab69282575d8752634de5bc102d2c445951693976c1a98badc0481aa",
   "outcome": "pass",
   "schema_version": "awesome-capture.smoke-receipt/v1",
   "source": {
     "auth_mode": "anonymous",
     "fallback": "none",
-    "fingerprint": "4a4b4651e5e76af4ee5c44943c81620a87baf7c0f77cee169ff9ade8a0daa25e",
+    "fingerprint": "c9e82ab94b43c581587b46b1325cae68eabab79fed0f709ba6d290605385a5a7",
     "platform": "twitter"
   },
   "tools": [
