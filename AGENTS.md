@@ -176,9 +176,16 @@ Git tag 使用 `vX.Y.Z`，版本文件使用 `X.Y.Z`。`main` 是未发布开发
 python3 tools/release.py check
 ```
 
-正式 Release 当前还必须用 `validate-existing --require-pass
---require-current-digest --require-all-cases` 验证全部预登记 smoke case；普通 PR
-CI 不使用 `--require-all-cases`，因此可在没有真实外部 smoke 时运行。
+正式 Release 使用候选 commit 中已审查的 `smoke/release-scope.json` 声明受
+影响组件，并运行 `validate-release`。Scope 绑定上一 release 的版本和 commit；
+门禁从该基线到候选 `HEAD` 保守推导下载/转写脚本、skill 行为规范、case
+registry 和共享 contract 的最低组件，声明只能扩大、不能缩小。正式候选的
+基线必须严格低于候选版本、恰为 changelog 中紧邻的上一版本，并由对应不可
+移动轻量 tag 精确指向；仅未曾创建 tag/Release 的 `0.1.0` 历史版本边界使用
+代码中固定完整 SHA 的一次性 bootstrap。所有 receipt 仍严格复验 schema、
+语义、脱敏、注册身份和 passing outcome；只有 scope 映射出的 case 必须覆盖
+完整且匹配当前 implementation digest。普通 PR CI 可在没有真实外部 smoke
+时运行。
 
 ### Unified CLI JSON protocol
 
@@ -250,6 +257,8 @@ python3 tools/smoke_receipts.py digest
 python3 tools/smoke_receipts.py validate \
   "/absolute/path/to/smoke-receipt.json" \
   --require-pass --require-current-digest
+python3 tools/smoke_receipts.py components
+python3 tools/smoke_receipts.py validate-release
 ```
 
 skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目录为当前工作目录的写法。
@@ -347,8 +356,9 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 
 ## 9. Known Tested Baseline
 
-`v0.1.0`（2026-07-28）是首个统一 SemVer 发行边界。下列工具版本与测试
-结果是该版本准备时的历史可复现基线，不代替当前实现的发布证据：
+`0.1.0`（2026-07-28）是未创建 tag/Release 的历史 SemVer 版本边界。下列
+工具版本与测试结果是该版本准备时的历史可复现基线，不代替当前实现的发布
+证据：
 
 - 支持 Python 3.11–3.14；CI 覆盖 Ubuntu 3.11–3.14 与 macOS 3.11、3.14，全部使用 no-skip runner；
 - `awesome-capture.artifact/v2` 为当前唯一可接受的媒体 artifact 版本；v1 是明确拒绝的 legacy 输入；
@@ -361,6 +371,7 @@ skill 自己的 `SKILL.md` 中使用 `python3 scripts/...`，那是以 skill 目
 - `whisper.cpp 1.9.1`。
 
 版本号是可复现基线，不是永久上限。路径验证应覆盖受影响平台与引擎；正式
-Release 当前进一步要求全部预登记 case 都有 passing 且匹配当前
-implementation digest 的 `awesome-capture.smoke-receipt/v1`。receipt 时间仅
-用于审计，不设固定过期门槛，也不得用历史实现的 receipt 替代当前实现证据。
+Release 按已审查的 release scope 要求对应预登记 case 具有 passing 且匹配
+当前 implementation digest 的 `awesome-capture.smoke-receipt/v1`，不强迫
+未受影响组件重跑。receipt 时间仅用于审计，不设固定过期门槛，也不得用历史
+实现的 receipt 替代当前实现证据。

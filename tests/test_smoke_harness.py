@@ -721,6 +721,7 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertIn(Path("contracts/contract_runtime.py"), paths)
         self.assertIn(Path("tools/run_smoke.py"), paths)
         self.assertIn(Path("smoke/cases.json"), paths)
+        self.assertIn(Path("smoke/release-scope.json"), paths)
         self.assertFalse(
             any(path.parts[:2] == ("smoke", "receipts") for path in paths)
         )
@@ -918,7 +919,7 @@ class SmokeHarnessTests(unittest.TestCase):
             receipt["implementation_digest"],
         )
 
-    def test_validate_existing_release_flags_enforce_outcome_and_digest(self):
+    def test_validate_existing_flags_enforce_outcome_and_digest(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             script = Path(smoke_receipts.__file__).resolve()
@@ -1001,40 +1002,13 @@ class SmokeHarnessTests(unittest.TestCase):
                 "STALE_SMOKE_RECEIPT",
             )
 
-            empty_dir = root / "empty"
-            empty_dir.mkdir()
-            rejected_empty = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "validate-existing",
-                    "--directory",
-                    str(empty_dir),
-                    "--require-pass",
-                    "--require-current-digest",
-                    "--require-all-cases",
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
-                env=environment,
-            )
-            self.assertEqual(rejected_empty.returncode, 2)
-            self.assertEqual(rejected_empty.stdout, "")
-            self.assertEqual(
-                json.loads(rejected_empty.stderr)["error"]["code"],
-                "SMOKE_EVIDENCE_MISSING",
-            )
-
-            rejected_partial = subprocess.run(
+            compatibility_all_cases = subprocess.run(
                 [
                     sys.executable,
                     str(script),
                     "validate-existing",
                     "--directory",
                     str(passing_dir),
-                    "--require-pass",
-                    "--require-current-digest",
                     "--require-all-cases",
                 ],
                 text=True,
@@ -1042,12 +1016,152 @@ class SmokeHarnessTests(unittest.TestCase):
                 check=False,
                 env=environment,
             )
-            self.assertEqual(rejected_partial.returncode, 2)
-            self.assertEqual(rejected_partial.stdout, "")
+            self.assertEqual(compatibility_all_cases.returncode, 2)
+            self.assertEqual(compatibility_all_cases.stdout, "")
             self.assertEqual(
-                json.loads(rejected_partial.stderr)["error"]["code"],
+                json.loads(compatibility_all_cases.stderr)["error"]["code"],
                 "SMOKE_EVIDENCE_MISSING",
             )
+
+    def test_validate_release_cli_enforces_reviewed_component_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipts_dir = root / "receipts"
+            receipts_dir.mkdir()
+            current_digest = smoke_receipts.implementation_digest()
+
+            copied_receipts: dict[str, dict[str, object]] = {}
+            for source in sorted((ROOT / "smoke" / "receipts").glob("*.json")):
+                receipt = json.loads(source.read_text(encoding="utf-8"))
+                receipt["implementation_digest"] = current_digest
+                copied_receipts[source.name] = receipt
+                self.write_private_json(receipts_dir / source.name, receipt)
+            self.assertEqual(len(copied_receipts), 6)
+
+            unrelated = self.registered_transcription_receipt()
+            unrelated["implementation_digest"] = "0" * 64
+            self.write_private_json(
+                receipts_dir / "whisper-cpp-local.json",
+                unrelated,
+            )
+
+            development_scope = smoke_receipts.validate_release_scope()
+            formal_scope = {
+                **development_scope,
+                "candidate_version": "0.1.1",
+            }
+
+            def run_release() -> tuple[int, str, str]:
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        smoke_receipts,
+                        "validate_release_scope",
+                        return_value=formal_scope,
+                    ),
+                    mock.patch.object(sys, "stdout", stdout),
+                    mock.patch.object(sys, "stderr", stderr),
+                ):
+                    return_code = smoke_receipts.main(
+                        [
+                            "validate-release",
+                            "--directory",
+                            str(receipts_dir),
+                        ]
+                    )
+                return return_code, stdout.getvalue(), stderr.getvalue()
+
+            accepted_code, accepted_stdout, accepted_stderr = run_release()
+            self.assertEqual(accepted_code, 0, accepted_stderr)
+            payload = json.loads(accepted_stdout)
+            self.assertEqual(payload["candidate_version"], "0.1.1")
+            self.assertEqual(payload["required_components"], ["download"])
+            self.assertEqual(payload["inferred_components"], ["download"])
+            self.assertEqual(payload["required_case_count"], 6)
+            self.assertEqual(payload["covered_case_count"], 6)
+            self.assertEqual(payload["implementation_digest"], current_digest)
+            self.assertNotIn(str(root), accepted_stdout)
+            self.assertNotIn("validated", payload)
+            self.assertNotIn('"path"', accepted_stdout)
+
+            youtube_path = receipts_dir / "youtube-anonymous.json"
+            wrong_name = receipts_dir / "wrong-name.json"
+            youtube_path.rename(wrong_name)
+            mismatch_code, mismatch_stdout, mismatch_stderr = run_release()
+            self.assertEqual(mismatch_code, 2)
+            self.assertEqual(mismatch_stdout, "")
+            self.assertEqual(
+                json.loads(mismatch_stderr)["error"]["code"],
+                "SMOKE_RECEIPT_SET_INVALID",
+            )
+            wrong_name.rename(youtube_path)
+
+            missing_path = receipts_dir / "bilibili-anonymous.json"
+            missing_value = copied_receipts[missing_path.name]
+            missing_path.unlink()
+            missing_code, missing_stdout, missing_stderr = run_release()
+            self.assertEqual(missing_code, 2)
+            self.assertEqual(missing_stdout, "")
+            self.assertEqual(
+                json.loads(missing_stderr)["error"]["code"],
+                "SMOKE_EVIDENCE_MISSING",
+            )
+            self.write_private_json(missing_path, missing_value)
+
+            unrelated["outcome"] = "fail"
+            unrelated["assertions"][0]["passed"] = False
+            self.write_private_json(
+                receipts_dir / "whisper-cpp-local.json",
+                unrelated,
+            )
+            failed_code, failed_stdout, failed_stderr = run_release()
+            self.assertEqual(failed_code, 2)
+            self.assertEqual(failed_stdout, "")
+            self.assertEqual(
+                json.loads(failed_stderr)["error"]["code"],
+                "SMOKE_FAILED",
+            )
+
+    def test_validate_release_rejects_current_version_as_its_own_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            receipts_dir = Path(temporary) / "receipts"
+            receipts_dir.mkdir()
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(sys, "stdout", stdout),
+                mock.patch.object(sys, "stderr", stderr),
+            ):
+                return_code = smoke_receipts.main(
+                    [
+                        "validate-release",
+                        "--directory",
+                        str(receipts_dir),
+                    ]
+                )
+            self.assertEqual(return_code, 2)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(
+                json.loads(stderr.getvalue())["error"]["code"],
+                "SMOKE_RELEASE_SCOPE_VERSION_MISMATCH",
+            )
+
+            parser_error = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(smoke_receipts.__file__).resolve()),
+                    "validate-release",
+                    "--scope",
+                    str(smoke_receipts.RELEASE_SCOPE_PATH),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(parser_error.returncode, 2)
+            self.assertEqual(parser_error.stdout, "")
+            self.assertIn("unrecognized arguments: --scope", parser_error.stderr)
 
     def test_validate_cli_binds_one_receipt_to_the_requested_case(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1123,7 +1237,480 @@ class SmokeHarnessTests(unittest.TestCase):
                 "SMOKE_RECEIPT_SET_INVALID",
             )
 
-    def test_release_coverage_requires_every_registered_case(self):
+    def test_release_components_are_derived_from_registered_cases(self):
+        components = smoke_receipts.smoke_component_cases()
+        self.assertEqual(
+            components["download:twitter"],
+            ["twitter-anonymous", "twitter-gallery-fallback"],
+        )
+        self.assertEqual(
+            components["transcription:whisper-cpp"],
+            [
+                "whisper-cpp-cpu",
+                "whisper-cpp-gpu-fallback",
+                "whisper-cpp-local",
+            ],
+        )
+        self.assertEqual(
+            components["transcription:external"],
+            ["external-local", "external-long-resume"],
+        )
+        self.assertEqual(len(components["download"]), 6)
+        self.assertEqual(len(components["transcription"]), 7)
+        registry = smoke_receipts.load_case_registry()
+        leaf_case_ids = {
+            case_id
+            for component, case_ids in components.items()
+            if ":" in component
+            for case_id in case_ids
+        }
+        self.assertEqual(leaf_case_ids, set(registry))
+
+    def test_release_scope_is_strict_explicit_and_nonredundant(self):
+        default_scope = smoke_receipts.load_release_scope()
+        self.assertEqual(
+            default_scope["required_components"],
+            ["download"],
+        )
+        baseline = default_scope["base_commit"]
+        baseline_version = default_scope["base_version"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def write_scope(name: str, value: object) -> Path:
+                path = root / name
+                payload = value
+                if isinstance(value, dict):
+                    payload = dict(value)
+                    payload.setdefault("base_commit", baseline)
+                    payload.setdefault("base_version", baseline_version)
+                self.write_private_json(path, payload)
+                return path
+
+            selected = write_scope(
+                "selected.json",
+                {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": [
+                        "download:twitter",
+                        "transcription:external",
+                    ],
+                },
+            )
+            self.assertEqual(
+                smoke_receipts.load_release_scope(selected)[
+                    "required_components"
+                ],
+                ["download:twitter", "transcription:external"],
+            )
+            none = write_scope(
+                "none.json",
+                {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+            )
+            self.assertEqual(
+                smoke_receipts.load_release_scope(none)["required_components"],
+                [],
+            )
+
+            invalid_scopes = {
+                "unknown-key.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "none",
+                    "required_components": [],
+                    "unexpected": True,
+                },
+                "unknown-version.json": {
+                    "schema_version": "awesome-capture.smoke-release-scope/v0",
+                    "base_commit": baseline,
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+                "selected-empty.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": [],
+                },
+                "impact-list.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": ["none"],
+                    "required_components": [],
+                },
+                "none-selected.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "none",
+                    "required_components": ["download"],
+                },
+                "duplicate.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": ["download", "download"],
+                },
+                "unsorted.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": [
+                        "transcription",
+                        "download",
+                    ],
+                },
+                "redundant.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": [
+                        "download",
+                        "download:youtube",
+                    ],
+                },
+                "unknown-component.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": baseline,
+                    "external_impact": "selected",
+                    "required_components": ["download:unknown"],
+                },
+                "invalid-base.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": "not-a-commit",
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+                "invalid-base-version.json": {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_version": "01.0.0",
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+            }
+            for name, value in invalid_scopes.items():
+                with self.subTest(scope=name):
+                    with self.assertRaises(smoke_receipts.ContractError):
+                        smoke_receipts.load_release_scope(
+                            write_scope(name, value)
+                        )
+
+            invalid_raw = {
+                "duplicate-key.json": (
+                    '{"schema_version":"awesome-capture.smoke-release-scope/v1",'
+                    '"schema_version":"awesome-capture.smoke-release-scope/v1",'
+                    '"external_impact":"none","required_components":[]}'
+                ),
+                "nonfinite.json": (
+                    '{"schema_version":"awesome-capture.smoke-release-scope/v1",'
+                    '"external_impact":"none","required_components":[NaN]}'
+                ),
+                "truncated.json": '{"schema_version":',
+            }
+            for name, raw in invalid_raw.items():
+                with self.subTest(scope=name):
+                    path = root / name
+                    path.write_text(raw, encoding="utf-8")
+                    os.chmod(path, 0o600)
+                    with self.assertRaises(smoke_receipts.ContractError):
+                        smoke_receipts.load_release_scope(path)
+
+            scope_symlink = root / "scope-symlink.json"
+            os.symlink(none.name, scope_symlink)
+            with self.assertRaises(smoke_receipts.ContractError) as raised:
+                smoke_receipts.load_release_scope(scope_symlink)
+            self.assertEqual(
+                raised.exception.code,
+                "SMOKE_RELEASE_SCOPE_INVALID",
+            )
+
+            nonrelease_head = root / "nonrelease-head.json"
+            head_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+            self.write_private_json(
+                nonrelease_head,
+                {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": head_commit,
+                    "base_version": baseline_version,
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+            )
+            with self.assertRaises(smoke_receipts.ContractError) as raised:
+                smoke_receipts.validate_release_scope(nonrelease_head)
+            self.assertEqual(
+                raised.exception.code,
+                "SMOKE_RELEASE_SCOPE_INVALID",
+            )
+
+            scope_hardlink = root / "scope-hardlink.json"
+            os.link(none, scope_hardlink)
+            with self.assertRaises(smoke_receipts.ContractError) as raised:
+                smoke_receipts.load_release_scope(scope_hardlink)
+            self.assertEqual(
+                raised.exception.code,
+                "SMOKE_RELEASE_SCOPE_INVALID",
+            )
+
+    def test_release_scope_machine_inference_is_fail_closed(self):
+        self.assertEqual(
+            smoke_receipts.infer_components_for_paths(
+                [
+                    "README.md",
+                    "skills/build-obsidian-vault/scripts/vault_builder.py",
+                    "skills/download-video/scripts/download_video.py",
+                    "skills/download-video/SKILL.md",
+                    "skills/download-video/references/platforms.md",
+                ]
+            ),
+            ["download"],
+        )
+        self.assertEqual(
+            smoke_receipts.infer_components_for_paths(
+                [
+                    "contracts/contract_runtime.py",
+                    "skills/transcribe-media/scripts/transcribe_media.py",
+                    "skills/transcribe-media/SKILL.md",
+                    "skills/transcribe-media/references/engines.md",
+                    "smoke/cases.json",
+                ]
+            ),
+            ["download", "transcription"],
+        )
+        self.assertEqual(
+            smoke_receipts.infer_components_for_paths(
+                [
+                    "skills/download-video/VERSION",
+                    "skills/transcribe-media/VERSION",
+                ]
+            ),
+            [],
+        )
+        self.assertEqual(
+            smoke_receipts.changed_case_components_since(
+                smoke_receipts.BOOTSTRAP_RELEASE_COMMITS["0.1.0"]
+            ),
+            ["download"],
+        )
+        before = {
+            "schema_version": "awesome-capture.smoke-cases/v1",
+            "cases": [
+                {
+                    "case_id": "download-case",
+                    "suite": "download",
+                    "platform": "youtube",
+                },
+                {
+                    "case_id": "asr-case",
+                    "suite": "transcription",
+                    "engine": "external",
+                },
+            ],
+        }
+        after = json.loads(json.dumps(before))
+        after["schema_version"] = "awesome-capture.smoke-cases/v2"
+        self.assertEqual(
+            smoke_receipts.changed_case_registry_components(before, after),
+            [],
+        )
+        after["cases"][1]["engine"] = "whisper-cpp"
+        self.assertEqual(
+            smoke_receipts.changed_case_registry_components(before, after),
+            ["transcription"],
+        )
+        after["cases"].append(
+            {
+                "case_id": "new-download-case",
+                "suite": "download",
+                "platform": "twitter",
+            }
+        )
+        self.assertEqual(
+            smoke_receipts.changed_case_registry_components(before, after),
+            ["download", "transcription"],
+        )
+        with self.assertRaises(smoke_receipts.ContractError) as raised:
+            smoke_receipts.infer_components_for_paths(
+                ["skills/new-network-skill/scripts/run.py"]
+            )
+        self.assertEqual(raised.exception.code, "SMOKE_IMPACT_UNMAPPED")
+
+        validated = smoke_receipts.validate_release_scope()
+        self.assertEqual(validated["inferred_components"], ["download"])
+        self.assertEqual(validated["required_components"], ["download"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = validated["base_commit"]
+            for name, components in (
+                ("none", []),
+                ("leaf", ["download:youtube"]),
+            ):
+                scope_path = root / f"{name}.json"
+                self.write_private_json(
+                    scope_path,
+                    {
+                        "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                        "base_commit": baseline,
+                        "base_version": validated["base_version"],
+                        "external_impact": (
+                            "none" if not components else "selected"
+                        ),
+                        "required_components": components,
+                    },
+                )
+                with self.subTest(scope=name):
+                    with self.assertRaises(
+                        smoke_receipts.ContractError
+                    ) as raised:
+                        smoke_receipts.validate_release_scope(scope_path)
+                    self.assertEqual(
+                        raised.exception.code,
+                        "SMOKE_RELEASE_SCOPE_INCOMPLETE",
+                    )
+
+            unavailable = root / "unavailable.json"
+            self.write_private_json(
+                unavailable,
+                {
+                    "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                    "base_commit": "f" * 40,
+                    "base_version": validated["base_version"],
+                    "external_impact": "none",
+                    "required_components": [],
+                },
+            )
+            with self.assertRaises(smoke_receipts.ContractError) as raised:
+                smoke_receipts.validate_release_scope(unavailable)
+            self.assertEqual(
+                raised.exception.code,
+                "SMOKE_RELEASE_SCOPE_INVALID",
+            )
+
+    def test_formal_scope_binds_the_immediately_prior_release(self):
+        bootstrap_commit = smoke_receipts.BOOTSTRAP_RELEASE_COMMITS["0.1.0"]
+        scope = {
+            "base_commit": bootstrap_commit,
+            "base_version": "0.1.0",
+            "external_impact": "selected",
+            "required_components": ["download"],
+        }
+        with (
+            mock.patch.object(
+                smoke_receipts,
+                "load_release_scope",
+                return_value=scope,
+            ),
+            mock.patch.object(
+                smoke_receipts,
+                "version_at_head",
+                return_value="0.1.1",
+            ),
+            mock.patch.object(
+                smoke_receipts,
+                "release_metadata_at_head",
+                return_value=(["0.1.1", "0.1.0"], True),
+            ),
+            mock.patch.object(
+                smoke_receipts,
+                "changed_paths_since",
+                return_value=["skills/download-video/scripts/download_video.py"],
+            ),
+        ):
+            validated = smoke_receipts.validate_release_scope(
+                require_prior_version=True
+            )
+        self.assertEqual(validated["candidate_version"], "0.1.1")
+        self.assertEqual(validated["base_version"], "0.1.0")
+        self.assertEqual(validated["inferred_components"], ["download"])
+
+        for releases, unreleased_is_empty in (
+            (["0.1.1", "0.0.9", "0.1.0"], True),
+            (["0.1.1", "0.1.0"], False),
+            (["0.1.0"], True),
+        ):
+            with (
+                self.subTest(
+                    releases=releases,
+                    unreleased_is_empty=unreleased_is_empty,
+                ),
+                mock.patch.object(
+                    smoke_receipts,
+                    "load_release_scope",
+                    return_value=scope,
+                ),
+                mock.patch.object(
+                    smoke_receipts,
+                    "version_at_head",
+                    return_value="0.1.1",
+                ),
+                mock.patch.object(
+                    smoke_receipts,
+                    "release_metadata_at_head",
+                    return_value=(releases, unreleased_is_empty),
+                ),
+            ):
+                with self.assertRaises(
+                    smoke_receipts.ContractError
+                ) as raised:
+                    smoke_receipts.validate_release_scope(
+                        require_prior_version=True
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "SMOKE_RELEASE_SCOPE_VERSION_MISMATCH",
+                )
+
+        self_baseline = {
+            **scope,
+            "base_commit": "f" * 40,
+            "base_version": "0.1.1",
+        }
+        with (
+            mock.patch.object(
+                smoke_receipts,
+                "load_release_scope",
+                return_value=self_baseline,
+            ),
+            mock.patch.object(
+                smoke_receipts,
+                "version_at_head",
+                return_value="0.1.1",
+            ),
+        ):
+            with self.assertRaises(smoke_receipts.ContractError) as raised:
+                smoke_receipts.validate_release_scope(
+                    require_prior_version=True
+                )
+        self.assertEqual(
+            raised.exception.code,
+            "SMOKE_RELEASE_SCOPE_VERSION_MISMATCH",
+        )
+
+        head_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        self.assertNotEqual(head_commit, bootstrap_commit)
+        with self.assertRaises(smoke_receipts.ContractError) as raised:
+            smoke_receipts.changed_paths_since(head_commit, "0.1.0")
+        self.assertEqual(
+            raised.exception.code,
+            "SMOKE_RELEASE_SCOPE_INVALID",
+        )
+
+    def test_release_coverage_requires_only_selected_components(self):
         case_ids = set(smoke_receipts.load_case_registry())
         complete = [
             {
@@ -1134,21 +1721,91 @@ class SmokeHarnessTests(unittest.TestCase):
             }
             for case_id in sorted(case_ids)
         ]
-        coverage = smoke_receipts.validate_required_case_coverage(complete)
-        self.assertEqual(coverage["required_case_count"], len(case_ids))
-        self.assertEqual(coverage["covered_case_count"], len(case_ids))
+        with mock.patch.object(
+            smoke_receipts,
+            "implementation_digest",
+            return_value="a" * 64,
+        ):
+            coverage = smoke_receipts.validate_required_component_coverage(
+                complete,
+                ["download:twitter"],
+            )
+        self.assertEqual(coverage["required_case_count"], 2)
+        self.assertEqual(coverage["covered_case_count"], 2)
+        self.assertEqual(
+            coverage["required_components"],
+            ["download:twitter"],
+        )
 
         without_twitter_fallback = [
             receipt
             for receipt in complete
             if receipt["case_id"] != "twitter-gallery-fallback"
         ]
-        self.assertEqual(len(without_twitter_fallback), len(complete) - 1)
-        with self.assertRaises(smoke_receipts.ContractError) as raised:
-            smoke_receipts.validate_required_case_coverage(
-                without_twitter_fallback
+        with (
+            mock.patch.object(
+                smoke_receipts,
+                "implementation_digest",
+                return_value="a" * 64,
+            ),
+            self.assertRaises(smoke_receipts.ContractError) as raised,
+        ):
+            smoke_receipts.validate_required_component_coverage(
+                without_twitter_fallback,
+                ["download:twitter"],
             )
         self.assertEqual(raised.exception.code, "SMOKE_EVIDENCE_MISSING")
+
+        youtube = next(
+            receipt
+            for receipt in complete
+            if receipt["case_id"] == "youtube-anonymous"
+        )
+        stale_unrelated = next(
+            receipt
+            for receipt in complete
+            if receipt["case_id"] == "whisper-cpp-local"
+        ).copy()
+        stale_unrelated["implementation_digest"] = "0" * 64
+        with mock.patch.object(
+            smoke_receipts,
+            "implementation_digest",
+            return_value="a" * 64,
+        ):
+            coverage = smoke_receipts.validate_required_component_coverage(
+                [youtube, stale_unrelated],
+                ["download:youtube"],
+            )
+        self.assertEqual(coverage["required_case_count"], 1)
+
+        stale_required = youtube.copy()
+        stale_required["implementation_digest"] = "0" * 64
+        failed_required = youtube.copy()
+        failed_required["outcome"] = "fail"
+        invalid_sets = (
+            ("stale", [stale_required], "STALE_SMOKE_RECEIPT"),
+            ("failed", [failed_required], "SMOKE_FAILED"),
+            (
+                "duplicate",
+                [youtube, youtube.copy()],
+                "SMOKE_RECEIPT_SET_INVALID",
+            ),
+        )
+        for name, receipts, expected_code in invalid_sets:
+            with (
+                self.subTest(case=name),
+                mock.patch.object(
+                    smoke_receipts,
+                    "implementation_digest",
+                    return_value="a" * 64,
+                ),
+                self.assertRaises(smoke_receipts.ContractError) as raised,
+            ):
+                smoke_receipts.validate_required_component_coverage(
+                    receipts,
+                    ["download:youtube"],
+                )
+            self.assertEqual(raised.exception.code, expected_code)
 
     def test_registered_case_platform_and_engine_mismatches_are_rejected(self):
         platform_mismatch = self.registered_download_receipt()

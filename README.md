@@ -1,7 +1,6 @@
 # Awesome Capture
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/cyberpinkman/awesome-capture?display_name=tag&sort=semver&style=flat-square&label=release)](https://github.com/cyberpinkman/awesome-capture/releases/latest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/cyberpinkman/awesome-capture/tests.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=tests)](https://github.com/cyberpinkman/awesome-capture/actions/workflows/tests.yml)
 
 **支持的视频平台**
@@ -31,9 +30,10 @@
 > 安全支持范围：macOS / Linux（POSIX），Python 3.11–3.14。
 > 当前能力边界：单个公开视频、本地音视频、本地 Obsidian vault；不支持 DRM、付费、私密内容或登录绕过。
 
-当前稳定版本为 `v0.1.0`。普通使用请固定到
+仓库已经公开，当前版本元数据为 `0.1.0`，但尚未创建 Git tag 或
 [GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)；
-`main` 是开发分支，可能包含尚未发布或破坏兼容性的变化。
+因此目前没有可声明为稳定、不可变的 release tag。`main` 是公开开发分支，
+可能继续变化；当前使用者应记录实际检出的 commit SHA。
 
 [贡献指南](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) ·
 [版本策略](VERSIONING.md) · [发布流程](RELEASING.md) ·
@@ -132,17 +132,19 @@ plan → 用户确认 → build → audit
 
 ## 快速安装
 
-### 1. 获取稳定版
+### 1. 获取当前公开源码
 
 ```bash
-git clone --branch v0.1.0 --depth 1 \
+git clone --branch main --depth 1 \
   https://github.com/cyberpinkman/awesome-capture.git
 cd awesome-capture
+git rev-parse HEAD
 ```
 
-上面的 tag 是可复现安装边界。需要其他版本时，从
-[Releases](https://github.com/cyberpinkman/awesome-capture/releases) 选择并
-替换 `v0.1.0`；不要把浮动的 `main` 当作稳定版本安装。
+请保存最后一条命令输出的完整 SHA，作为本次安装的精确代码身份。仓库创建
+首个正式 [GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)
+后，稳定安装将改为检出对应不可移动 tag；在此之前不要把浮动的 `main`
+描述成可复现稳定版。
 
 ### 2. 注册到 Codex
 
@@ -403,7 +405,7 @@ Video v2 记录脱敏来源指纹、媒体 bytes/hash、整数毫秒时长、视
   case、单文件、脱敏和 outcome 复验后才上传；每次 workflow attempt 使用
   唯一 receipt 目录。
 
-当前下载发布证据覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
+已登记的下载 smoke 组合覆盖五个平台及其实际受支持路由：YouTube、Bilibili、X
 匿名下载，Douyin 隔离临时浏览器，以及 TikTok/X 的 gallery fallback。
 其中 `twitter-anonymous` 使用真实 `yt-dlp` 直连，证明 X 的自然匿名路径。
 `tiktok-gallery-fallback` 与 `twitter-gallery-fallback` 各自绑定不可互换的
@@ -423,8 +425,20 @@ ASR/硬件组合当前可用。对外发布受影响的平台或引擎时，应�
 `outcome: pass` 且匹配当前 `implementation_digest` 的正式脱敏 smoke
 receipt。receipt 时间仅作为审计记录，不设固定过期门槛；缺少匹配当前实现
 的 receipt 时，不应把旧实现或历史运行结果当作当前发布证据。
-正式 Release 会进一步要求全部预登记 smoke case 均有匹配 receipt；普通 PR
-CI 仍允许真实 receipt 目录为空。
+正式 Release 读取候选 commit 中已审查的 `smoke/release-scope.json`，只要求
+受影响组件映射出的预登记 case 提供当前 passing receipt；不会仅因仓库登记了
+其他平台或 ASR 引擎就要求全部重跑。Scope 使用
+`download`、`download:<platform>`、`transcription` 或
+`transcription:<engine>`；确无外部执行路径变化时必须显式声明
+`external_impact: none`，不能在 workflow dispatch 时临时缩小范围。目录内
+所有 receipt 仍会逐份通过严格 schema、语义、脱敏、已注册 case 和 outcome
+校验。Scope 还绑定上一 release 的版本与 commit；门禁会比较该基线到候选
+`HEAD` 的执行脚本、skill 行为规范、case registry 和 contract 变化，声明
+只能扩大机器推导的最低组件集合，不能缩小。正式发布时，基线版本必须严格
+低于候选版本、恰好是 changelog 中紧邻的上一版本，并由对应的不可移动轻量
+tag 精确指向；在自动发布流程建立前记录的 `0.1.0` 历史版本边界从未创建
+tag/Release，仅允许仓库中写死的完整 commit SHA 作为一次性 bootstrap
+边界。普通 PR CI 仍允许真实 receipt 目录为空。
 
 本地执行与 CI 相同的核心门禁：
 
@@ -445,6 +459,13 @@ git diff --check
 环境变量名和下载样本的脱敏 SHA-256 指纹，但不保存原始 URL；受控 TikTok/X
 fallback 还分别固定登记不可互换的 fault profile。receipt 禁止原始 URL、
 Cookie、token、媒体内容、transcript 和私有绝对路径。
+
+维护者可用下面的命令查看精确映射并复验正式候选：
+
+```bash
+python3 tools/smoke_receipts.py components
+python3 tools/smoke_receipts.py validate-release
+```
 
 正式 smoke receipt 也只证明其记录的 commit、implementation digest、工具版本和公开样本上的链路可运行，不证明所有账号、地区、网络或未来平台版本都可用。
 
@@ -467,7 +488,7 @@ Cookie、token、媒体内容、transcript 和私有绝对路径。
 ├── RELEASING.md
 ├── requirements-ci.lock
 ├── SECURITY.md
-├── smoke/              # 公开 case alias；不存媒体或秘密
+├── smoke/              # 公开 case、release scope 与脱敏 receipt；不存媒体或秘密
 ├── skills/
 │   ├── download-video/
 │   ├── transcribe-media/

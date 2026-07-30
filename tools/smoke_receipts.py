@@ -19,14 +19,15 @@ sys.path.insert(0, str(ROOT))
 
 from contracts.contract_runtime import (  # noqa: E402
     ContractError,
-    loads_strict,
     read_json_strict,
     validate_contract,
 )
 
 CASES_PATH = ROOT / "smoke" / "cases.json"
+RELEASE_SCOPE_PATH = ROOT / "smoke" / "release-scope.json"
 FUTURE_SKEW = dt.timedelta(minutes=5)
 CASES_SCHEMA = "awesome-capture.smoke-cases/v3"
+RELEASE_SCOPE_SCHEMA = "awesome-capture.smoke-release-scope/v1"
 CONTROLLED_FAULT_BINDINGS = {
     "twitter-gallery-fallback": (
         "twitter",
@@ -51,7 +52,11 @@ CONTROLLED_FAULT_ASSERTIONS = {
     "controlled-fallback-fresh-output-observed",
 }
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 ENV_NAME_PATTERN = re.compile(r"^AWESOME_CAPTURE_SMOKE_[A-Z0-9_]+$")
+SEMVER_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+)
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 BINARY_CASES = {
@@ -60,6 +65,13 @@ BINARY_CASES = {
     "whisper-cpp-gpu-fallback",
     "external-local",
     "external-long-resume",
+}
+# The 0.1.0 version boundary predates the immutable-tag release workflow and
+# never had a tag or GitHub Release. Keep this one historical boundary pinned by
+# its full commit identity; every later baseline must resolve through its
+# published lightweight tag.
+BOOTSTRAP_RELEASE_COMMITS = {
+    "0.1.0": "f0f4c46f07aa1b508f7dac5e1586b25fbb879009",
 }
 
 
@@ -90,6 +102,7 @@ def tracked_files() -> list[Path]:
         Path("SECURITY.md"),
         Path("requirements-ci.lock"),
         Path("smoke/cases.json"),
+        Path("smoke/release-scope.json"),
     ):
         if (ROOT / relative).is_file():
             result.add(relative)
@@ -119,8 +132,12 @@ def parse_timestamp(raw: str) -> dt.datetime:
 
 def load_case_registry() -> dict[str, dict[str, Any]]:
     try:
-        value = loads_strict(CASES_PATH.read_bytes(), max_bytes=1024 * 1024)
-    except OSError as exc:
+        value = read_json_strict(
+            CASES_PATH,
+            validate=False,
+            maximum_bytes=1024 * 1024,
+        )
+    except (ContractError, OSError) as exc:
         raise ContractError(
             "SMOKE_CASES_INVALID",
             "Preregistered smoke cases are unavailable.",
@@ -144,10 +161,14 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
                 "Preregistered smoke case identity is malformed.",
             )
         suite = raw.get("suite")
+        case_id = raw.get("case_id")
         if suite == "download":
             required = common | {"source_fingerprint"}
             allowed = required | {"expectation"}
-            if raw.get("case_id") in CONTROLLED_FAULT_BINDINGS:
+            if (
+                isinstance(case_id, str)
+                and case_id in CONTROLLED_FAULT_BINDINGS
+            ):
                 required |= {"fault_profile"}
                 allowed |= {"fault_profile"}
         elif suite == "transcription":
@@ -162,9 +183,9 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
             not required
             or not required.issubset(raw)
             or not set(raw).issubset(allowed)
-            or not isinstance(raw.get("case_id"), str)
-            or CASE_ID_PATTERN.fullmatch(raw["case_id"]) is None
-            or raw["case_id"] in registry
+            or not isinstance(case_id, str)
+            or CASE_ID_PATTERN.fullmatch(case_id) is None
+            or case_id in registry
         ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
@@ -175,17 +196,24 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
             if suite == "download"
             else {"local"}
         )
-        if raw.get("platform") not in expected_platforms:
+        if (
+            not isinstance(raw.get("platform"), str)
+            or raw["platform"] not in expected_platforms
+        ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
                 "Preregistered smoke case platform is malformed.",
             )
-        if suite == "transcription" and raw.get("engine") not in {
-            "whisper-cpp",
-            "faster-whisper",
-            "mlx-whisper",
-            "external",
-        }:
+        if suite == "transcription" and (
+            not isinstance(raw.get("engine"), str)
+            or raw["engine"]
+            not in {
+                "whisper-cpp",
+                "faster-whisper",
+                "mlx-whisper",
+                "external",
+            }
+        ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
                 "Preregistered smoke engine is malformed.",
@@ -213,13 +241,16 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
             if suite == "download"
             else {"cpu_only", "gpu_fallback", "sigkill_resume"}
         )
-        if expectation is not None and expectation not in valid_expectations:
+        if expectation is not None and (
+            not isinstance(expectation, str)
+            or expectation not in valid_expectations
+        ):
             raise ContractError(
                 "SMOKE_CASES_INVALID",
                 "Preregistered smoke expectation is malformed.",
             )
         fault_profile = raw.get("fault_profile")
-        controlled_binding = CONTROLLED_FAULT_BINDINGS.get(raw["case_id"])
+        controlled_binding = CONTROLLED_FAULT_BINDINGS.get(case_id)
         if fault_profile is not None and (
             controlled_binding is None
             or suite != "download"
@@ -261,7 +292,7 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
                 "SMOKE_CASES_INVALID",
                 "Preregistered controlled tool evidence binding is malformed.",
             )
-        registry[raw["case_id"]] = raw
+        registry[case_id] = raw
     download_fingerprints = [
         case["source_fingerprint"]
         for case in registry.values()
@@ -287,6 +318,511 @@ def load_case_registry() -> dict[str, dict[str, Any]]:
             "Preregistered controlled faults are incomplete or duplicated.",
         )
     return registry
+
+
+def smoke_component_cases(
+    registry: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, list[str]]:
+    cases = registry if registry is not None else load_case_registry()
+    components: dict[str, set[str]] = {}
+    for case_id, case in cases.items():
+        suite = case["suite"]
+        if suite == "download":
+            leaf = f"download:{case['platform']}"
+        else:
+            leaf = f"transcription:{case['engine']}"
+        components.setdefault(suite, set()).add(case_id)
+        components.setdefault(leaf, set()).add(case_id)
+    return {
+        component: sorted(case_ids)
+        for component, case_ids in sorted(components.items())
+    }
+
+
+def load_release_scope(
+    path: Path = RELEASE_SCOPE_PATH,
+) -> dict[str, Any]:
+    try:
+        value = read_json_strict(
+            path,
+            validate=False,
+            maximum_bytes=64 * 1024,
+        )
+    except (ContractError, OSError) as exc:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke scope is unavailable.",
+        ) from exc
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "schema_version",
+            "base_commit",
+            "base_version",
+            "external_impact",
+            "required_components",
+        }
+        or value["schema_version"] != RELEASE_SCOPE_SCHEMA
+        or not isinstance(value["base_commit"], str)
+        or COMMIT_PATTERN.fullmatch(value["base_commit"]) is None
+        or not isinstance(value["base_version"], str)
+        or SEMVER_PATTERN.fullmatch(value["base_version"]) is None
+        or not isinstance(value["external_impact"], str)
+        or value["external_impact"] not in {"none", "selected"}
+        or not isinstance(value["required_components"], list)
+        or any(
+            not isinstance(component, str)
+            for component in value["required_components"]
+        )
+    ):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke scope is malformed.",
+        )
+    components = value["required_components"]
+    if (value["external_impact"] == "none") != (components == []):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke scope impact and components are inconsistent.",
+        )
+    if components != sorted(components) or len(components) != len(set(components)):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke components must be sorted and unique.",
+        )
+    available = smoke_component_cases()
+    unknown = [component for component in components if component not in available]
+    if unknown:
+        raise ContractError(
+            "SMOKE_COMPONENT_UNKNOWN",
+            "Release smoke scope names an unknown component.",
+        )
+    selected = set(components)
+    if any(
+        ":" in component and component.split(":", 1)[0] in selected
+        for component in components
+    ):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke scope contains redundant components.",
+        )
+    return {
+        "base_commit": value["base_commit"],
+        "base_version": value["base_version"],
+        "external_impact": value["external_impact"],
+        "required_components": components,
+    }
+
+
+def infer_components_for_paths(paths: list[str]) -> list[str]:
+    inferred: set[str] = set()
+    for raw in paths:
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or raw.startswith("/")
+            or "\\" in raw
+            or any(component in {"", ".", ".."} for component in raw.split("/"))
+        ):
+            raise ContractError(
+                "SMOKE_IMPACT_UNMAPPED",
+                "Release change path cannot be classified safely.",
+            )
+        parts = raw.split("/")
+        if raw == "smoke/cases.json":
+            inferred.update({"download", "transcription"})
+            continue
+        if parts[0] == "contracts":
+            inferred.update({"download", "transcription"})
+            continue
+        if (
+            parts[:2] == ["skills", "download-video"]
+            and parts[2:] != ["VERSION"]
+        ):
+            inferred.add("download")
+            continue
+        if (
+            parts[:2] == ["skills", "transcribe-media"]
+            and parts[2:] != ["VERSION"]
+        ):
+            inferred.add("transcription")
+            continue
+        if (
+            parts[0] == "skills"
+            and len(parts) >= 3
+            and parts[2] == "scripts"
+            and parts[1]
+            not in {
+                "build-obsidian-vault",
+                "download-video",
+                "ingest-knowledge",
+                "transcribe-media",
+            }
+        ):
+            raise ContractError(
+                "SMOKE_IMPACT_UNMAPPED",
+                "An unknown skill execution surface changed.",
+            )
+    return sorted(inferred)
+
+
+def _strict_git_json(raw: bytes) -> Any:
+    if len(raw) > 4 * 1024 * 1024:
+        raise ContractError(
+            "SMOKE_IMPACT_UNMAPPED",
+            "Historical smoke registry is too large.",
+        )
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate key")
+            value[key] = item
+        return value
+
+    def reject_constant(_: str) -> None:
+        raise ValueError("non-finite number")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ContractError(
+            "SMOKE_IMPACT_UNMAPPED",
+            "Historical smoke registry cannot be classified safely.",
+        ) from exc
+
+
+def changed_case_registry_components(
+    before: Any,
+    after: Any,
+) -> list[str]:
+    def project(value: Any) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"schema_version", "cases"}
+            or not isinstance(value["schema_version"], str)
+            or not isinstance(value["cases"], list)
+        ):
+            raise ContractError(
+                "SMOKE_IMPACT_UNMAPPED",
+                "Smoke registry shape cannot be classified safely.",
+            )
+        cases: dict[str, dict[str, Any]] = {}
+        for case in value["cases"]:
+            if (
+                not isinstance(case, dict)
+                or not isinstance(case.get("case_id"), str)
+                or case["case_id"] in cases
+                or case.get("suite") not in {"download", "transcription"}
+            ):
+                raise ContractError(
+                    "SMOKE_IMPACT_UNMAPPED",
+                    "Smoke registry case cannot be classified safely.",
+                )
+            cases[case["case_id"]] = case
+        return cases, {
+            key: item
+            for key, item in value.items()
+            if key not in {"schema_version", "cases"}
+        }
+
+    before_cases, before_global = project(before)
+    after_cases, after_global = project(after)
+    if before_global != after_global:
+        return ["download", "transcription"]
+    inferred: set[str] = set()
+    for case_id in set(before_cases) | set(after_cases):
+        old = before_cases.get(case_id)
+        new = after_cases.get(case_id)
+        if old == new:
+            continue
+        for case in (old, new):
+            if case is not None:
+                inferred.add(case["suite"])
+    return sorted(inferred)
+
+
+def changed_case_components_since(base_commit: str) -> list[str]:
+    try:
+        before_raw = subprocess.run(
+            ["git", "show", f"{base_commit}:smoke/cases.json"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+        after_raw = subprocess.run(
+            ["git", "show", "HEAD:smoke/cases.json"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ContractError(
+            "SMOKE_IMPACT_UNMAPPED",
+            "Smoke registry history cannot be verified.",
+        ) from exc
+    return changed_case_registry_components(
+        _strict_git_json(before_raw),
+        _strict_git_json(after_raw),
+    )
+
+
+def changed_paths_since(base_commit: str, base_version: str) -> list[str]:
+    if COMMIT_PATTERN.fullmatch(base_commit) is None:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke baseline is malformed.",
+        )
+    try:
+        exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{base_commit}^{{commit}}"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", base_commit, "HEAD"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if exists.returncode != 0 or ancestor.returncode != 0:
+            raise ContractError(
+                "SMOKE_RELEASE_SCOPE_INVALID",
+                "Release smoke baseline is unavailable or not an ancestor.",
+            )
+        tag_ref = f"refs/tags/v{base_version}"
+        tag = subprocess.run(
+            ["git", "show-ref", "--verify", "--hash", tag_ref],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if tag.returncode == 0:
+            tag_type = subprocess.run(
+                ["git", "cat-file", "-t", tag_ref],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            ).stdout
+            tag_commit = subprocess.run(
+                ["git", "rev-parse", f"{tag_ref}^{{commit}}"],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            ).stdout
+            if (
+                tag_type != b"commit\n"
+                or tag_commit != f"{base_commit}\n".encode("ascii")
+            ):
+                raise ContractError(
+                    "SMOKE_RELEASE_SCOPE_INVALID",
+                    "Release smoke baseline tag does not identify its commit.",
+                )
+        elif BOOTSTRAP_RELEASE_COMMITS.get(base_version) != base_commit:
+            raise ContractError(
+                "SMOKE_RELEASE_SCOPE_INVALID",
+                "Release smoke baseline has no immutable release identity.",
+            )
+        version = subprocess.run(
+            ["git", "show", f"{base_commit}:VERSION"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+        changelog = subprocess.run(
+            ["git", "show", f"{base_commit}:CHANGELOG.md"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout.decode("utf-8", errors="strict")
+        if version != f"{base_version}\n".encode("ascii"):
+            raise ContractError(
+                "SMOKE_RELEASE_SCOPE_INVALID",
+                "Release smoke baseline version does not match its commit.",
+            )
+        unreleased = re.search(
+            r"(?ms)^## \[Unreleased\]\s*\n(.*?)(?=^## \[|\Z)",
+            changelog,
+        )
+        released_heading = re.search(
+            rf"(?m)^## \[{re.escape(base_version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$",
+            changelog,
+        )
+        if (
+            unreleased is None
+            or unreleased.group(1).strip()
+            or released_heading is None
+        ):
+            raise ContractError(
+                "SMOKE_RELEASE_SCOPE_INVALID",
+                "Release smoke baseline is not a completed release boundary.",
+            )
+        changed = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--diff-filter=ACDMRTUXB",
+                base_commit,
+                "HEAD",
+                "--",
+            ],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        decoded = changed.stdout.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ContractError(
+            "SMOKE_IMPACT_UNMAPPED",
+            "Release change paths are not valid UTF-8.",
+        ) from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Release smoke baseline cannot be verified.",
+        ) from exc
+    paths = decoded.split("\0")
+    if paths and paths[-1] == "":
+        paths.pop()
+    return paths
+
+
+def version_at_head() -> str:
+    try:
+        raw = subprocess.run(
+            ["git", "show", "HEAD:VERSION"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+        value = raw.decode("ascii", errors="strict")
+    except (OSError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Candidate release version cannot be verified.",
+        ) from exc
+    if not value.endswith("\n") or SEMVER_PATTERN.fullmatch(value[:-1]) is None:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Candidate release version is malformed.",
+        )
+    return value[:-1]
+
+
+def release_metadata_at_head() -> tuple[list[str], bool]:
+    try:
+        raw = subprocess.run(
+            ["git", "show", "HEAD:CHANGELOG.md"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+        changelog = raw.decode("utf-8", errors="strict")
+    except (OSError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INVALID",
+            "Candidate release changelog cannot be verified.",
+        ) from exc
+    versions = re.findall(
+        r"(?m)^## \[((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\."
+        r"(?:0|[1-9][0-9]*))\] - \d{4}-\d{2}-\d{2}$",
+        changelog,
+    )
+    unreleased = re.search(
+        r"(?ms)^## \[Unreleased\]\s*\n(.*?)(?=^## \[|\Z)",
+        changelog,
+    )
+    return versions, unreleased is not None and not unreleased.group(1).strip()
+
+
+def _semver_tuple(value: str) -> tuple[int, int, int]:
+    major, minor, patch = value.split(".")
+    return int(major), int(minor), int(patch)
+
+
+def validate_release_scope(
+    path: Path = RELEASE_SCOPE_PATH,
+    *,
+    require_prior_version: bool = False,
+) -> dict[str, Any]:
+    scope = load_release_scope(path)
+    candidate_version = version_at_head()
+    base_version = _semver_tuple(scope["base_version"])
+    current_version = _semver_tuple(candidate_version)
+    if base_version > current_version or (
+        require_prior_version and base_version >= current_version
+    ):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_VERSION_MISMATCH",
+            "Release smoke baseline version is not prior to the candidate.",
+        )
+    if require_prior_version:
+        release_versions, unreleased_is_empty = release_metadata_at_head()
+        if (
+            not unreleased_is_empty
+            or len(release_versions) < 2
+            or release_versions[0] != candidate_version
+            or release_versions[1] != scope["base_version"]
+        ):
+            raise ContractError(
+                "SMOKE_RELEASE_SCOPE_VERSION_MISMATCH",
+                "Release smoke baseline is not the prior changelog release.",
+            )
+    changed_paths = changed_paths_since(
+        scope["base_commit"],
+        scope["base_version"],
+    )
+    inferred = set(
+        infer_components_for_paths(
+            [path for path in changed_paths if path != "smoke/cases.json"]
+        )
+    )
+    if "smoke/cases.json" in changed_paths:
+        inferred.update(changed_case_components_since(scope["base_commit"]))
+    inferred_components = sorted(inferred)
+    component_cases = smoke_component_cases()
+    inferred_cases = {
+        case_id
+        for component in inferred_components
+        for case_id in component_cases[component]
+    }
+    declared_cases = {
+        case_id
+        for component in scope["required_components"]
+        for case_id in component_cases[component]
+    }
+    if not inferred_cases.issubset(declared_cases):
+        raise ContractError(
+            "SMOKE_RELEASE_SCOPE_INCOMPLETE",
+            "Release smoke scope omits a changed execution surface.",
+        )
+    return {
+        **scope,
+        "candidate_version": candidate_version,
+        "inferred_components": inferred_components,
+    }
 
 
 def _required_assertions(case: dict[str, Any]) -> set[str]:
@@ -548,20 +1084,54 @@ def validate_receipt(
     }
 
 
-def validate_required_case_coverage(
+def validate_required_component_coverage(
     receipts: list[dict[str, str]],
-) -> dict[str, int]:
-    required = set(load_case_registry())
-    covered = {receipt["case_id"] for receipt in receipts}
-    missing = sorted(required - covered)
+    required_components: list[str],
+) -> dict[str, Any]:
+    components = smoke_component_cases()
+    if any(component not in components for component in required_components):
+        raise ContractError(
+            "SMOKE_COMPONENT_UNKNOWN",
+            "Required smoke coverage names an unknown component.",
+        )
+    required = {
+        case_id
+        for component in required_components
+        for case_id in components[component]
+    }
+    receipts_by_case: dict[str, dict[str, str]] = {}
+    for receipt in receipts:
+        case_id = receipt["case_id"]
+        if case_id in receipts_by_case:
+            raise ContractError(
+                "SMOKE_RECEIPT_SET_INVALID",
+                "Smoke receipt case identities must be unique.",
+            )
+        receipts_by_case[case_id] = receipt
+    missing = sorted(required - set(receipts_by_case))
     if missing:
         raise ContractError(
             "SMOKE_EVIDENCE_MISSING",
-            "Required preregistered smoke evidence is missing.",
+            "Required component smoke evidence is missing.",
         )
+    current_digest = implementation_digest()
+    for case_id in sorted(required):
+        receipt = receipts_by_case[case_id]
+        if receipt["outcome"] != "pass":
+            raise ContractError(
+                "SMOKE_FAILED",
+                "Required component smoke receipt outcome is not pass.",
+            )
+        if receipt["implementation_digest"] != current_digest:
+            raise ContractError(
+                "STALE_SMOKE_RECEIPT",
+                "Required component smoke receipt does not match the current tree.",
+            )
     return {
+        "required_components": required_components,
         "required_case_count": len(required),
-        "covered_case_count": len(required & covered),
+        "covered_case_count": len(required & set(receipts_by_case)),
+        "implementation_digest": current_digest,
     }
 
 
@@ -589,7 +1159,34 @@ def build_parser() -> argparse.ArgumentParser:
     existing_parser.add_argument(
         "--require-all-cases",
         action="store_true",
-        help="Require validated evidence for every preregistered smoke case.",
+        help=(
+            "Compatibility diagnostic that requires current passing evidence "
+            "for both aggregate smoke suites; formal releases use validate-release."
+        ),
+    )
+    components_parser = subparsers.add_parser(
+        "components",
+        help="List valid release smoke components and their registered cases.",
+    )
+    components_parser.set_defaults(command="components")
+    scope_parser = subparsers.add_parser(
+        "validate-scope",
+        help="Validate the reviewed release smoke scope without requiring receipts.",
+    )
+    scope_parser.add_argument(
+        "--scope",
+        default=str(RELEASE_SCOPE_PATH),
+    )
+    release_parser = subparsers.add_parser(
+        "validate-release",
+        help=(
+            "Validate every tracked receipt and require current passing evidence "
+            "for the reviewed release scope."
+        ),
+    )
+    release_parser.add_argument(
+        "--directory",
+        default=str(ROOT / "smoke" / "receipts"),
     )
     return parser
 
@@ -602,6 +1199,17 @@ def main(argv: list[str] | None = None) -> int:
             result: dict[str, Any] = {
                 "status": "ok",
                 "implementation_digest": implementation_digest(paths),
+            }
+        elif args.command == "components":
+            result = {
+                "status": "ok",
+                "components": smoke_component_cases(),
+            }
+        elif args.command == "validate-scope":
+            scope = validate_release_scope(Path(args.scope))
+            result = {
+                "status": "ok",
+                **scope,
             }
         elif args.command == "validate":
             if args.require_single and len(args.receipts) != 1:
@@ -626,7 +1234,7 @@ def main(argv: list[str] | None = None) -> int:
                     "Smoke receipt does not match the requested case.",
                 )
             result = {"status": "ok", "validated": receipts}
-        else:
+        elif args.command == "validate-existing":
             directory = Path(args.directory)
             paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
             receipts = [
@@ -637,14 +1245,52 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for path in paths
             ]
-            coverage = (
-                validate_required_case_coverage(receipts)
-                if args.require_all_cases
-                else {}
-            )
             result = {
                 "status": "ok",
                 "validated": receipts,
+                "receipt_count": len(receipts),
+                **(
+                    validate_required_component_coverage(
+                        receipts,
+                        ["download", "transcription"],
+                    )
+                    if args.require_all_cases
+                    else {}
+                ),
+            }
+        else:
+            directory = Path(args.directory)
+            paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
+            receipts = [
+                validate_receipt(
+                    path,
+                    require_pass=True,
+                    require_current_digest=False,
+                )
+                for path in paths
+            ]
+            if any(
+                path.name != f"{receipt['case_id']}.json"
+                for path, receipt in zip(paths, receipts, strict=True)
+            ):
+                raise ContractError(
+                    "SMOKE_RECEIPT_SET_INVALID",
+                    "Release smoke receipt filenames must match their case identities.",
+                )
+            scope = validate_release_scope(require_prior_version=True)
+            coverage = validate_required_component_coverage(
+                receipts,
+                scope["required_components"],
+            )
+            result = {
+                "status": "ok",
+                "base_commit": scope["base_commit"],
+                "base_version": scope["base_version"],
+                "candidate_version": scope["candidate_version"],
+                "inferred_components": scope["inferred_components"],
+                "validated_case_ids": sorted(
+                    receipt["case_id"] for receipt in receipts
+                ),
                 "receipt_count": len(receipts),
                 **coverage,
             }

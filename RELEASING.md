@@ -12,8 +12,18 @@
    到 `## [X.Y.Z] - YYYY-MM-DD`，保留空的 `[Unreleased]`。
 3. 更新根目录 `VERSION`，再同步四个 `skills/*/VERSION`。版本文件不包含
    `v`；tag 包含 `v`。
-4. 若 README 的稳定安装示例或版本链接需要变化，一并更新。
-5. 确认仓库中没有媒体、模型、Cookie、artifact/state、私有 receipt、日志、
+4. 审查从上一 release 到候选 commit 的外部平台与 ASR 变化，并更新
+   `smoke/release-scope.json`。`base_version` 与 `base_commit` 必须指向上一
+   个 `[Unreleased]` 为空的完整 release 边界：版本严格低于候选版本、恰好是
+   候选 changelog 中紧邻的上一版本，并由 `v<base_version>` 不可移动轻量
+   tag 精确指向。自动发布流程建立前记录的 `0.1.0` 历史版本边界未曾创建
+   tag/Release，是唯一 bootstrap 例外，只能使用工具中固定的完整 commit
+   SHA。有影响时使用
+   `external_impact: selected` 并列出受影响组件，确实没有外部执行路径变化
+   时才显式使用 `external_impact: none` 和空列表。Scope 必须先于最终 smoke
+   固定，因为它本身参与 `implementation_digest`。
+5. 若 README 的稳定安装示例或版本链接需要变化，一并更新。
+6. 确认仓库中没有媒体、模型、Cookie、artifact/state、私有 receipt、日志、
    本机路径或内部实施材料。
 
 版本元数据使用标准库工具维护：
@@ -58,11 +68,45 @@ digest、脱敏和 `outcome: pass` 校验，并匹配待发布实现；时间戳
 只证明回退韧性，不得描述为 TikTok 或 X 自然失败。不存在调用者可传入的故障
 命令、可执行路径，或任意 fault CLI、workflow、环境变量输入。
 
-正式 Release 当前要求 `smoke/cases.json` 中每个预登记 case 都有匹配证据。
+正式 Release 按候选 commit 中已审查的 `smoke/release-scope.json` 要求证据，
+不再无条件要求全部预登记 case。组件由 registry 现有字段确定：
+
+- `download` 覆盖全部下载 case；`download:<platform>` 只覆盖对应平台，
+  例如 `download:twitter` 同时要求 X 匿名与 gallery fallback；
+- `transcription` 覆盖全部本地 ASR case；
+  `transcription:<engine>` 覆盖对应引擎，例如 whisper.cpp 的正常、CPU 与
+  GPU fallback 路径。
+
+可以用 `python3 tools/smoke_receipts.py components` 查看精确映射。聚合组件与
+其子组件不得同时声明，组件必须排序、唯一且已注册。`external_impact: none`
+只适用于相对上一 release 确实没有外部平台、ASR 引擎或其执行路径变化的版本，
+不能用来规避所需证据。
+
+门禁会验证 baseline commit 存在、属于候选 commit 的祖先、其中 `VERSION`
+等于 `base_version`、对应 changelog release 存在且 `[Unreleased]` 为空；
+正式候选还必须使用更高版本，并把 changelog 中紧邻的上一版本作为 baseline。
+除上述固定的 `0.1.0` bootstrap 外，轻量 tag 必须精确解析到 baseline
+commit。通过后才比较 baseline 到候选 `HEAD` 的改动。下载执行脚本变化至少
+要求 `download`；下载 skill 的行为规范或 reference 变化同样计入。转写执行
+脚本、行为规范或 reference 变化至少要求 `transcription`，canonical
+contracts 变化至少要求两者；smoke case registry 按实际新增、删除或变化的
+case suite 推导，无法安全分类时失败关闭。未知 skill 执行面同样失败关闭。
+人工声明只能扩大这个机器推导下界，不能缩小。普通项目文档、测试、
+vault/ingest 和发布治理本身不会凭空要求外部 smoke。
+
 从 `manual smoke` workflow 下载 receipt artifact 后，应先逐份运行严格校验，
-再仅把通过校验的 JSON 保存为 `smoke/receipts/<case-id>.json` 并提交。普通 PR
-CI 可以在该目录为空时通过；Release workflow 会额外传入
-`--require-all-cases`，零份或部分 receipt 都会失败关闭。
+再仅把通过校验的 JSON 保存为 `smoke/receipts/<case-id>.json` 并提交。正式
+门禁使用：
+
+```bash
+python3 tools/smoke_receipts.py validate-release
+```
+
+该命令会对目录中的每份 receipt 继续执行严格 JSON、schema、语义、脱敏、
+已注册 case 与 `outcome: pass` 校验，并拒绝重复 case 或文件名不匹配；只有
+scope 映射出的 required case 必须覆盖完整且匹配当前
+`implementation_digest`。未受影响组件的合法历史 receipt 可以保留旧 digest，
+不会迫使本次 release 重跑无关引擎。普通 PR CI 仍可在 receipt 目录为空时通过。
 
 发布 commit 必须位于 `main`，并且该确切 commit SHA 的完整 tests workflow
 成功。不要仅依赖较早 commit、其他分支或部分 matrix job 的绿灯。

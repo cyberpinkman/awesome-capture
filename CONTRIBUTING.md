@@ -84,7 +84,7 @@ PR 正文必须明确：
 | Canonical contract | 只改 `contracts/` 源码，再生成 vendored 副本；同步 producer、全部 consumer、fixtures、测试、SKILL/reference 和 breaking policy |
 | 外部平台或 ASR | mock/fixture 测试之外，运行受影响路径的真实 smoke；只提交通过 schema、digest、脱敏和 outcome 校验的 receipt |
 | CI 或发布流程 | 给出原失败 run/复现证据和根因；远程 Action 固定完整 commit SHA；不得通过放宽 no-skip、完整性或秘密门禁制造绿灯 |
-| Release preparation | 额外遵循 [`RELEASING.md`](RELEASING.md)，并验证目标版本、全部预登记 smoke 和确切 release commit |
+| Release preparation | 额外遵循 [`RELEASING.md`](RELEASING.md)，审查并提交受影响组件 scope，验证所需 smoke 和确切 release commit |
 
 ### Canonical contract 规则
 
@@ -175,6 +175,19 @@ Cookie 必须留在受控环境；普通 PR CI 不下载模型，也不接收任
   `--require-case <alias>`，通过 schema、digest、case、脱敏和 outcome 复验
   后才可上传。每个 workflow attempt 使用独立目录；harness 失败可以保留
   合法的 `outcome: fail` 审计证据，但验证失败的 JSON 不得上传。
+- 正式发布范围只能由候选 commit 中的 `smoke/release-scope.json` 声明，不能
+  通过 workflow dispatch 临时缩小。Scope 的 `base_version` 和 `base_commit`
+  必须绑定上一完整 release 边界；门禁会对 baseline 到候选 `HEAD` 的执行
+  脚本、skill 行为规范、case registry 和 contract 变化保守推导最低组件，
+  声明只能扩大、不能缩小。
+  正式候选的基线版本必须严格更低、恰为 changelog 中紧邻的上一版本，并由
+  对应不可移动轻量 tag 精确指向；仅未曾创建 tag/Release 的 `0.1.0` 历史
+  版本边界使用代码中固定完整 SHA 的一次性 bootstrap。
+  `external_impact: selected` 必须列出排序、唯一且已注册的受影响组件；
+  `external_impact: none` 必须使用空列表，且只适用于机器下界也为空的版本。
+- Release 门禁仍严格验证目录内每份 receipt 的 schema、语义、脱敏、已注册
+  case 和 passing outcome；仅 scope 内 case 强制 current digest 与完整覆盖。
+  聚合组件与其子组件不得重复声明。
 
 ## Review 与合并规则
 

@@ -78,6 +78,15 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertIn('HOMEBREW_NO_AUTO_UPDATE: "1"', macos)
         self.assertLess(macos.index(macos_install), macos.index(preflight))
         self.assertEqual(workflow.count("--github-annotations"), 2)
+        self.assertEqual(
+            workflow.count("tools/smoke_receipts.py validate-scope"),
+            2,
+        )
+        self.assertEqual(
+            workflow.count("tools/smoke_receipts.py validate-existing"),
+            2,
+        )
+        self.assertEqual(workflow.count("fetch-depth: 0"), 2)
 
     def test_required_check_aggregates_the_complete_matrix(self) -> None:
         workflow = (ROOT / ".github/workflows/tests.yml").read_text(
@@ -185,12 +194,7 @@ class CiWorkflowTests(unittest.TestCase):
             'check-release \\\n            --requested-version "$REQUESTED_VERSION"',
             'notes --output "$RELEASE_NOTES"',
             "python tools/sync_vendored.py --check",
-            (
-                "python tools/smoke_receipts.py validate-existing \\\n"
-                "            --require-pass \\\n"
-                "            --require-current-digest \\\n"
-                "            --require-all-cases"
-            ),
+            "python tools/smoke_receipts.py validate-release",
             "python tools/check_repository_hygiene.py",
             "git diff --check",
             "git status --porcelain",
@@ -198,6 +202,9 @@ class CiWorkflowTests(unittest.TestCase):
         for gate in local_gates:
             with self.subTest(gate=gate):
                 self.assertIn(gate, workflow)
+        self.assertNotIn("--require-all-cases", workflow)
+        self.assertNotIn("smoke_components:", workflow)
+        self.assertNotIn("--scope", verify)
 
         self.assertIn(
             "actions/workflows/tests.yml/runs",

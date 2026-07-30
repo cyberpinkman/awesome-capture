@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -82,8 +84,10 @@ jobs:
       - name: Verify release metadata
         run: python tools/release.py check
 
-      - name: Validate any checked-in smoke receipts
-        run: python tools/smoke_receipts.py validate-existing
+      - name: Validate smoke scope and checked-in receipts
+        run: |
+          python tools/smoke_receipts.py validate-scope
+          python tools/smoke_receipts.py validate-existing
 
       - name: Run offline tests with no skips
         env:
@@ -112,6 +116,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -145,8 +151,10 @@ jobs:
       - name: Verify release metadata
         run: python tools/release.py check
 
-      - name: Validate any checked-in smoke receipts
-        run: python tools/smoke_receipts.py validate-existing
+      - name: Validate smoke scope and checked-in receipts
+        run: |
+          python tools/smoke_receipts.py validate-scope
+          python tools/smoke_receipts.py validate-existing
 
       - name: Run offline tests with no skips
         env:
