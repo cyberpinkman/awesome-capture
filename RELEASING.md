@@ -5,6 +5,8 @@
 
 ## 1. 准备版本
 
+0. 发行准备也必须通过符合 [`CONTRIBUTING.md`](CONTRIBUTING.md) 的独立
+   Pull Request 进入 `main`；不要直接在 `main` 上试错或修改版本。
 1. 根据 [`VERSIONING.md`](VERSIONING.md) 选择版本号。
 2. 将 [`CHANGELOG.md`](CHANGELOG.md) 中 `[Unreleased]` 的用户可见变化移动
    到 `## [X.Y.Z] - YYYY-MM-DD`，保留空的 `[Unreleased]`。
@@ -46,6 +48,15 @@ git diff --check
 `awesome-capture.smoke-receipt/v1` 的正式脱敏证据。Receipt 必须通过 schema、
 digest、脱敏和 `outcome: pass` 校验，并匹配待发布实现；时间戳保留用于审计，
 不设置固定过期天数。不得用旧 implementation digest 的结果替代当前实现证据。
+
+下载 smoke 的公开 URL 必须先规范化，并匹配 `smoke/cases.json` 中预登记的
+脱敏 SHA-256 指纹，workflow 不接受任意 URL。`twitter-anonymous` 证明真实
+`yt-dlp` 自然直连；`tiktok-gallery-fallback` 与
+`twitter-gallery-fallback` 则各自绑定不可互换的 registry 固定 fault profile，
+使用固定样本和 receipt 中明确披露的单次 `yt-dlp` `NETWORK_ERROR`，再通过
+未修改的生产 fallback gate 执行真实 `gallery-dl` 获取。两项 fallback case
+只证明回退韧性，不得描述为 TikTok 或 X 自然失败。不存在调用者可传入的故障
+命令、可执行路径，或任意 fault CLI、workflow、环境变量输入。
 
 正式 Release 当前要求 `smoke/cases.json` 中每个预登记 case 都有匹配证据。
 从 `manual smoke` workflow 下载 receipt artifact 后，应先逐份运行严格校验，

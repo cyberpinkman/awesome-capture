@@ -83,6 +83,10 @@ changed state. It never overwrites or deletes an unproven file.
 - Do not adopt an arbitrary pre-existing media file. Reuse is allowed only for
   a matching v2 artifact whose media is strictly revalidated.
 - Do not promise that anonymous downloading works on every network. Anti-bot sites require a current authorized session or a different network.
+- The bundled X/Twitter yt-dlp and gallery-dl routes force IPv4. This is a
+  transport compatibility choice for observed X media-CDN TLS EOF failures;
+  it does not disable certificate checks, add authentication, or affect other
+  platforms.
 - Keep the Douyin browser fallback isolated and anonymous. If it would require login, stop and obtain explicit user direction.
 - Prefer `yt-dlp 2026.07.04` or newer; that release repaired observed Bilibili extraction and includes security fixes absent from the installed 2026.03.17 build.
 - Read [platforms.md](references/platforms.md) when handling authentication, anti-bot errors, format selection, or platform-specific limitations.

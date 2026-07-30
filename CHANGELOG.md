@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+### Added
+
+- 建立公开 Pull Request 贡献规范、证据矩阵和 PR 模板，明确分支工作流、
+  contract/smoke/安全要求、CI 失败处理及最终 head SHA 合并门槛。
+
+### Fixed
+
+- macOS smoke harness 通过 POSIX 安全运行层统一固定的 `/var`、`/tmp` 系统别名，
+  避免长转写崩溃续跑因临时目录与 chunk manifest 路径拼写不同而误判失败。
+- X 的两条发布证据现在分工明确：`twitter-anonymous` 验证真实 `yt-dlp`
+  自然直连；`twitter-gallery-fallback` 使用已披露的单次受控网络错误，通过
+  未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性，不再
+  把受控路径表述为平台自然失败。
+- TikTok 同一预登记公开样本的自然路由在几分钟内从 gallery fallback 漂移为
+  直接成功，因此 `tiktok-gallery-fallback` 改用独立、明确披露的固定受控
+  `NETWORK_ERROR` profile；TikTok 与 X 的 profile 不可互换，两者都通过
+  未修改的生产 fallback gate 和真实 `gallery-dl` 确定性验证回退韧性。
+- X/Twitter 的 yt-dlp 与 gallery-dl 获取命令仅对该平台固定使用 IPv4，
+  修复默认地址族访问媒体 CDN 时可复现的 TLS EOF，同时保持证书校验开启。
+
+### Security
+
+- 手动真实 smoke 仅允许原仓库默认分支进入受控 Environment；持久
+  self-hosted runner 不执行 fork/PR ref，receipt 仅在独立通过 schema、
+  current digest、case、单文件、脱敏和 outcome 复验后上传，每次 attempt
+  使用唯一目录隔离历史结果。
+- 下载 smoke URL 必须匹配 registry 中预登记的规范化 SHA-256 指纹；受控
+  TikTok/X fallback 只允许各自不可互换的固定 fault profile，不接受任意故障
+  命令、可执行路径，或 fault CLI、workflow、环境变量输入。
+
 ## [0.1.0] - 2026-07-28
 
 ### Added

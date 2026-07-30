@@ -10,6 +10,13 @@
 | TikTok | `tiktok.com` | Yes | `gallery-dl` once for recoverable failures; otherwise session/network action |
 | X/Twitter | `x.com`, `twitter.com` | Yes | Explicit session for restricted posts |
 
+The bundled X/Twitter yt-dlp and gallery-dl commands use their official
+`--force-ipv4` option. On the tested macOS/Python 3.14 network, the default
+address-family route repeatedly ended X media downloads with a TLS
+`UNEXPECTED_EOF_WHILE_READING`, while the same public sources and certificate
+validation completed over IPv4. The option is scoped to X/Twitter; it neither
+disables TLS verification nor changes TikTok or other platforms.
+
 The isolated Douyin fallback waits 15 seconds by default. In the 2026-07-27
 smoke test, a 5-second initialization still produced cookies but yt-dlp rejected
 them as not fresh enough; 15 seconds produced a verified 15.068-second MP4.

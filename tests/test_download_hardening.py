@@ -945,10 +945,74 @@ class DownloadHardeningTests(unittest.TestCase):
                     )
 
             command = runner.call_args.args[0]
+            self.assertEqual(command.count("--force-ipv4"), 1)
+            self.assertNotIn("--no-check-certificate", command)
             self.assertEqual(command[command.index("-D") + 1], ".")
             pinned_cwd = runner.call_args.kwargs["pinned_cwd"]
             self.assertFalse(pinned_cwd.is_symlink())
             self.assertEqual(pinned_cwd.parent, layout["staging"])
+
+    def test_twitter_transport_is_ipv4_only_without_changing_other_platforms(self):
+        args = argparse.Namespace(
+            socket_timeout=20,
+            retries=3,
+            cookies=None,
+            cookies_from_browser=None,
+            impersonate=None,
+        )
+        with mock.patch.object(
+            download_video,
+            "require_tool",
+            return_value="/fake/yt-dlp",
+        ):
+            twitter = download_video.base_ytdlp_args(args, "twitter")
+            other_platforms = {
+                platform: download_video.base_ytdlp_args(args, platform)
+                for platform in ("douyin", "tiktok", "bilibili", "youtube")
+            }
+
+        self.assertEqual(twitter.count("--force-ipv4"), 1)
+        self.assertNotIn("--no-check-certificates", twitter)
+        for platform, command in other_platforms.items():
+            with self.subTest(platform=platform):
+                self.assertNotIn("--force-ipv4", command)
+                self.assertNotIn("--no-check-certificates", command)
+
+    def test_tiktok_gallery_fallback_keeps_default_address_family(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _, layout = self.managed(temporary)
+            args = argparse.Namespace(timeout=1)
+            original_error = download_video.DownloadError(
+                "DOWNLOAD_FAILED",
+                "download failed",
+                exit_code=5,
+            )
+            marker = RuntimeError("stop after command capture")
+            with (
+                mock.patch.object(
+                    download_video,
+                    "require_tool",
+                    return_value="/fake/gallery-dl",
+                ),
+                mock.patch.object(
+                    download_video,
+                    "run_process_raw",
+                    side_effect=marker,
+                ) as runner,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "command capture"):
+                    download_video._gallery_download_locked(
+                        args,
+                        url="https://www.tiktok.com/@example/video/1",
+                        platform_name="tiktok",
+                        layout=layout,
+                        fingerprint="f" * 64,
+                        original_error=original_error,
+                    )
+
+            command = runner.call_args.args[0]
+            self.assertNotIn("--force-ipv4", command)
+            self.assertNotIn("--no-check-certificate", command)
 
     def test_download_cli_confines_external_tool_to_private_staging(self):
         with tempfile.TemporaryDirectory() as temporary:

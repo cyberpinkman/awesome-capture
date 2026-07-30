@@ -6,6 +6,8 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -227,7 +229,7 @@ class SmokeHarnessTests(unittest.TestCase):
             ],
             "source": {
                 "platform": "youtube",
-                "fingerprint": "c" * 64,
+                "fingerprint": "41056884ffb08d869d53c54933c31dce7df1b1567a780face2bb065d9d62dae1",
                 "auth_mode": "anonymous",
                 "fallback": None,
             },
@@ -241,6 +243,8 @@ class SmokeHarnessTests(unittest.TestCase):
                     {
                         "registered-source-detected",
                         "registered-platform-matches",
+                        "registered-source-fingerprint-matches",
+                        "registered-source-is-canonical",
                         "required-tools-observed",
                         "anonymous-route-observed",
                         "download-command-succeeded",
@@ -251,6 +255,51 @@ class SmokeHarnessTests(unittest.TestCase):
             ],
             "warnings": [],
         }
+
+    def registered_controlled_fallback_receipt(
+        self,
+        case_id: str = "twitter-gallery-fallback",
+    ) -> dict[str, object]:
+        case = run_smoke.select_case(case_id)
+        self.assertIn(case_id, run_smoke.CONTROLLED_FAULT_BINDINGS)
+        receipt = self.registered_download_receipt()
+        receipt["case_id"] = case_id
+        receipt["source"] = {
+            "platform": case["platform"],
+            "fingerprint": case["source_fingerprint"],
+            "auth_mode": "anonymous",
+            "fallback": "gallery-dl",
+        }
+        receipt["tools"] = [
+            {"name": "python", "version": "3.14.0"},
+            {"name": "ffmpeg", "version": "8.1"},
+            {"name": "ffprobe", "version": "8.1"},
+            {"name": "yt-dlp", "version": "2026.7.4"},
+            {"name": "gallery-dl", "version": "1.32.8"},
+            {
+                "name": run_smoke.CONTROLLED_FAULT_TOOL,
+                "version": case["fault_profile"],
+            },
+        ]
+        receipt["assertions"] = [
+            {"name": name, "passed": True}
+            for name in sorted(
+                {
+                    "registered-source-detected",
+                    "registered-platform-matches",
+                    "registered-source-fingerprint-matches",
+                    "registered-source-is-canonical",
+                    "required-tools-observed",
+                    "download-command-succeeded",
+                    "video-artifact-v2-valid",
+                    "video-media-reverified",
+                    "required-gallery-dl-observed",
+                    *run_smoke.CONTROLLED_FAULT_ASSERTIONS,
+                }
+            )
+        ]
+        receipt["warnings"] = [run_smoke.CONTROLLED_FAULT_WARNING]
+        return receipt
 
     def registered_transcription_receipt(self) -> dict[str, object]:
         return {
@@ -319,8 +368,60 @@ class SmokeHarnessTests(unittest.TestCase):
                 require_current_digest=False,
             )
 
+    def assert_case_registry_rejected(
+        self,
+        cases: list[dict[str, object]],
+        *,
+        schema_version: str | None = None,
+        merge_with_registered: bool = True,
+    ) -> None:
+        candidate_cases = cases
+        if merge_with_registered:
+            registered_cases = run_smoke.load_cases()
+            replacements: dict[str, dict[str, object]] = {}
+            extras: list[dict[str, object]] = []
+            registered_ids = {
+                case["case_id"] for case in registered_cases
+            }
+            for case in cases:
+                case_id = case.get("case_id")
+                if (
+                    isinstance(case_id, str)
+                    and case_id in registered_ids
+                    and case_id not in replacements
+                ):
+                    replacements[case_id] = case
+                else:
+                    extras.append(case)
+            candidate_cases = [
+                replacements.get(case["case_id"], case)
+                for case in registered_cases
+            ]
+            candidate_cases.extend(extras)
+        value = {
+            "schema_version": schema_version or run_smoke.CASES_SCHEMA,
+            "cases": candidate_cases,
+        }
+        with self.assertRaises(run_smoke.SmokeError) as raised:
+            run_smoke._strict_cases(value)
+        self.assertEqual(raised.exception.code, "INVALID_CASES")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cases_path = Path(temporary) / "cases.json"
+            self.write_private_json(cases_path, value)
+            with mock.patch.object(smoke_receipts, "CASES_PATH", cases_path):
+                with self.assertRaises(
+                    smoke_receipts.ContractError
+                ) as receipt_raised:
+                    smoke_receipts.load_case_registry()
+        self.assertEqual(
+            receipt_raised.exception.code,
+            "SMOKE_CASES_INVALID",
+        )
+
     def test_cases_are_alias_only_and_unknown_alias_is_rejected(self):
         cases = run_smoke.load_cases()
+        self.assertEqual(run_smoke.CASES_SCHEMA, "awesome-capture.smoke-cases/v3")
         self.assertEqual(len(cases), 13)
         self.assertEqual(len({case["case_id"] for case in cases}), len(cases))
         download_cases = {
@@ -351,6 +452,38 @@ class SmokeHarnessTests(unittest.TestCase):
             download_cases["tiktok-gallery-fallback"]["expectation"],
             "gallery-dl",
         )
+        for case in download_cases.values():
+            self.assertRegex(case["source_fingerprint"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            run_smoke.CONTROLLED_FAULT_BINDINGS,
+            {
+                "twitter-gallery-fallback": (
+                    "twitter",
+                    "x-first-ytdlp-network-error-v1",
+                ),
+                "tiktok-gallery-fallback": (
+                    "tiktok",
+                    "tiktok-first-ytdlp-network-error-v1",
+                ),
+            },
+        )
+        for case_id, (platform_name, fault_profile) in (
+            run_smoke.CONTROLLED_FAULT_BINDINGS.items()
+        ):
+            controlled = download_cases[case_id]
+            self.assertEqual(controlled["platform"], platform_name)
+            self.assertEqual(controlled["fault_profile"], fault_profile)
+            self.assertIn(
+                run_smoke.CONTROLLED_FAULT_TOOL,
+                controlled["required_tools"],
+            )
+        self.assertFalse(
+            any(
+                case.get("fault_profile") is not None
+                for case_id, case in download_cases.items()
+                if case_id not in run_smoke.CONTROLLED_FAULT_BINDINGS
+            )
+        )
         for case in cases:
             self.assertNotIn("url", case)
             self.assertNotIn("path", case)
@@ -361,21 +494,176 @@ class SmokeHarnessTests(unittest.TestCase):
             run_smoke.select_case("https://example.invalid/video")
         self.assertEqual(raised.exception.code, "UNKNOWN_CASE")
 
+    def test_controlled_fault_producer_verifier_bindings_are_identical(self):
+        self.assertEqual(run_smoke.CASES_SCHEMA, smoke_receipts.CASES_SCHEMA)
+        self.assertEqual(
+            run_smoke.CONTROLLED_FAULT_BINDINGS,
+            smoke_receipts.CONTROLLED_FAULT_BINDINGS,
+        )
+        self.assertEqual(
+            run_smoke.CONTROLLED_FAULT_TOOL,
+            smoke_receipts.CONTROLLED_FAULT_TOOL,
+        )
+        self.assertEqual(
+            run_smoke.CONTROLLED_FAULT_WARNING,
+            smoke_receipts.CONTROLLED_FAULT_WARNING,
+        )
+        self.assertEqual(
+            run_smoke.CONTROLLED_FAULT_ASSERTIONS,
+            smoke_receipts.CONTROLLED_FAULT_ASSERTIONS,
+        )
+
     def test_cases_validator_rejects_literal_source_and_unknown_fields(self):
-        invalid = {
-            "schema_version": run_smoke.CASES_SCHEMA,
-            "cases": [
-                {
-                    "case_id": "unsafe",
-                    "suite": "download",
-                    "platform": "youtube",
-                    "source_env": "AWESOME_CAPTURE_SMOKE_YOUTUBE_URL",
-                    "source_url": "https://example.invalid/video",
-                }
-            ],
+        invalid = dict(run_smoke.select_case("youtube-anonymous"))
+        invalid["source_url"] = "https://example.invalid/video"
+        self.assert_case_registry_rejected([invalid])
+
+    def test_cases_v3_rejects_malformed_fingerprints_and_fault_bindings(self):
+        invalid_cases: dict[str, dict[str, object]] = {}
+        controlled_cases = {
+            case_id: run_smoke.select_case(case_id)
+            for case_id in run_smoke.CONTROLLED_FAULT_BINDINGS
         }
-        with self.assertRaises(run_smoke.SmokeError):
-            run_smoke._strict_cases(invalid)
+        controlled_ids = sorted(controlled_cases)
+
+        for case_id, registered in controlled_cases.items():
+            missing_fingerprint = dict(registered)
+            missing_fingerprint.pop("source_fingerprint")
+            invalid_cases[f"{case_id}-missing-fingerprint"] = (
+                missing_fingerprint
+            )
+
+            malformed_fingerprint = dict(registered)
+            malformed_fingerprint["source_fingerprint"] = "A" * 64
+            invalid_cases[f"{case_id}-malformed-fingerprint"] = (
+                malformed_fingerprint
+            )
+
+            missing_fault = dict(registered)
+            missing_fault.pop("fault_profile")
+            invalid_cases[f"{case_id}-missing-fault"] = missing_fault
+
+            unknown_fault = dict(registered)
+            unknown_fault["fault_profile"] = "unregistered-fault/v1"
+            invalid_cases[f"{case_id}-unknown-fault"] = unknown_fault
+
+            wrong_platform = dict(registered)
+            wrong_platform["platform"] = (
+                "tiktok"
+                if registered["platform"] == "twitter"
+                else "twitter"
+            )
+            invalid_cases[f"{case_id}-wrong-platform"] = wrong_platform
+
+            wrong_expectation = dict(registered)
+            wrong_expectation["expectation"] = "ephemeral_browser"
+            invalid_cases[f"{case_id}-wrong-expectation"] = (
+                wrong_expectation
+            )
+
+            missing_fault_tool = dict(registered)
+            missing_fault_tool["required_tools"] = [
+                item
+                for item in registered["required_tools"]
+                if item != run_smoke.CONTROLLED_FAULT_TOOL
+            ]
+            invalid_cases[f"{case_id}-missing-fault-tool"] = (
+                missing_fault_tool
+            )
+
+        for case_id, other_case_id in (
+            (controlled_ids[0], controlled_ids[1]),
+            (controlled_ids[1], controlled_ids[0]),
+        ):
+            cross_profile = dict(controlled_cases[case_id])
+            cross_profile["fault_profile"] = controlled_cases[other_case_id][
+                "fault_profile"
+            ]
+            invalid_cases[f"{case_id}-cross-profile"] = cross_profile
+
+            cross_case_id = dict(controlled_cases[case_id])
+            cross_case_id["case_id"] = other_case_id
+            invalid_cases[f"{case_id}-cross-case-id"] = cross_case_id
+
+        misbound_fault = dict(
+            controlled_cases["twitter-gallery-fallback"]
+        )
+        misbound_fault["case_id"] = "twitter-anonymous"
+        invalid_cases["misbound-fault"] = misbound_fault
+
+        unbound_fault_tool = dict(run_smoke.select_case("twitter-anonymous"))
+        unbound_fault_tool["required_tools"] = [
+            *unbound_fault_tool["required_tools"],
+            run_smoke.CONTROLLED_FAULT_TOOL,
+        ]
+        invalid_cases["unbound-fault-tool"] = unbound_fault_tool
+
+        invalid_env = dict(run_smoke.select_case("youtube-anonymous"))
+        invalid_env["source_env"] = "YOUTUBE_URL"
+        invalid_cases["invalid-env"] = invalid_env
+
+        invalid_platform = dict(run_smoke.select_case("youtube-anonymous"))
+        invalid_platform["platform"] = "vimeo"
+        invalid_cases["invalid-download-platform"] = invalid_platform
+
+        invalid_engine = dict(
+            run_smoke.select_case("faster-whisper-local")
+        )
+        invalid_engine["engine"] = "remote"
+        invalid_cases["invalid-transcription-engine"] = invalid_engine
+
+        invalid_expectation = dict(
+            run_smoke.select_case("tiktok-gallery-fallback")
+        )
+        invalid_expectation["expectation"] = "unbounded"
+        invalid_cases["invalid-expectation"] = invalid_expectation
+
+        invalid_tool = dict(run_smoke.select_case("youtube-anonymous"))
+        invalid_tool["required_tools"] = [
+            *invalid_tool["required_tools"],
+            "invalid tool name",
+        ]
+        invalid_cases["invalid-required-tool"] = invalid_tool
+
+        irrelevant_fingerprint = dict(
+            run_smoke.select_case("faster-whisper-local")
+        )
+        irrelevant_fingerprint["source_fingerprint"] = None
+        invalid_cases["irrelevant-null-fingerprint"] = irrelevant_fingerprint
+
+        irrelevant_fault = dict(
+            run_smoke.select_case("faster-whisper-local")
+        )
+        irrelevant_fault["fault_profile"] = None
+        invalid_cases["irrelevant-null-fault"] = irrelevant_fault
+
+        unknown_field = dict(run_smoke.select_case("youtube-anonymous"))
+        unknown_field["unknown_field"] = "otherwise-valid"
+        invalid_cases["unknown-field"] = unknown_field
+
+        for name, case in invalid_cases.items():
+            with self.subTest(name=name):
+                self.assert_case_registry_rejected([case])
+
+        first = dict(run_smoke.select_case("youtube-anonymous"))
+        second = dict(run_smoke.select_case("bilibili-anonymous"))
+        second["source_fingerprint"] = first["source_fingerprint"]
+        with self.subTest(name="duplicate-download-fingerprint"):
+            self.assert_case_registry_rejected([first, second])
+
+        self.assert_case_registry_rejected(
+            [controlled_cases["twitter-gallery-fallback"]],
+            schema_version="awesome-capture.smoke-cases/v2",
+        )
+        incomplete_registry = [
+            case
+            for case in run_smoke.load_cases()
+            if case["case_id"] != "tiktok-gallery-fallback"
+        ]
+        self.assert_case_registry_rejected(
+            incomplete_registry,
+            merge_with_registered=False,
+        )
 
     def test_subprocess_json_protocol_is_fail_closed(self):
         def runner(command, **unused):
@@ -433,6 +721,9 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertIn(Path("contracts/contract_runtime.py"), paths)
         self.assertIn(Path("tools/run_smoke.py"), paths)
         self.assertIn(Path("smoke/cases.json"), paths)
+        self.assertFalse(
+            any(path.parts[:2] == ("smoke", "receipts") for path in paths)
+        )
         self.assertRegex(smoke_receipts.implementation_digest(), r"^[0-9a-f]{64}$")
 
     def test_registered_passing_receipt_satisfies_release_evidence_contract(self):
@@ -441,6 +732,152 @@ class SmokeHarnessTests(unittest.TestCase):
         )
         self.assertEqual(validated["case_id"], "youtube-anonymous")
         self.assertEqual(validated["outcome"], "pass")
+
+    def test_registered_controlled_fallback_receipt_is_accepted(self):
+        for case_id in run_smoke.CONTROLLED_FAULT_BINDINGS:
+            with self.subTest(case_id=case_id):
+                validated = self.validate_receipt_value(
+                    self.registered_controlled_fallback_receipt(case_id)
+                )
+                self.assertEqual(validated["case_id"], case_id)
+                self.assertEqual(validated["outcome"], "pass")
+
+    def test_controlled_fallback_receipt_requires_complete_bound_evidence(self):
+        case_ids = sorted(run_smoke.CONTROLLED_FAULT_BINDINGS)
+        for case_id in case_ids:
+            other_case_id = next(
+                item for item in case_ids if item != case_id
+            )
+            missing_warning = self.registered_controlled_fallback_receipt(
+                case_id
+            )
+            missing_warning["warnings"] = []
+
+            missing_tool = self.registered_controlled_fallback_receipt(case_id)
+            missing_tool["tools"] = [
+                item
+                for item in missing_tool["tools"]
+                if item["name"] != run_smoke.CONTROLLED_FAULT_TOOL
+            ]
+
+            missing_assertion = (
+                self.registered_controlled_fallback_receipt(case_id)
+            )
+            missing_assertion["assertions"] = [
+                item
+                for item in missing_assertion["assertions"]
+                if item["name"]
+                != "controlled-ytdlp-network-error-observed"
+            ]
+
+            wrong_tool_version = (
+                self.registered_controlled_fallback_receipt(case_id)
+            )
+            for item in wrong_tool_version["tools"]:
+                if item["name"] == run_smoke.CONTROLLED_FAULT_TOOL:
+                    item["version"] = "different-fault-v1"
+
+            cross_profile_version = (
+                self.registered_controlled_fallback_receipt(case_id)
+            )
+            for item in cross_profile_version["tools"]:
+                if item["name"] == run_smoke.CONTROLLED_FAULT_TOOL:
+                    item["version"] = run_smoke.select_case(other_case_id)[
+                        "fault_profile"
+                    ]
+
+            unknown_controlled_claim = (
+                self.registered_controlled_fallback_receipt(case_id)
+            )
+            unknown_controlled_claim["assertions"].append(
+                {"name": "controlled-unregistered-claim", "passed": True}
+            )
+
+            for name, receipt in (
+                ("warning", missing_warning),
+                ("tool", missing_tool),
+                ("assertion", missing_assertion),
+                ("tool-version", wrong_tool_version),
+                ("cross-profile-version", cross_profile_version),
+                ("unknown-controlled-claim", unknown_controlled_claim),
+            ):
+                with self.subTest(case_id=case_id, missing=name):
+                    with self.assertRaises(
+                        smoke_receipts.ContractError
+                    ) as raised:
+                        self.validate_receipt_value(receipt)
+                    self.assertEqual(
+                        raised.exception.code,
+                        "SMOKE_CASE_MISMATCH",
+                    )
+
+    def test_controlled_fallback_receipts_reject_natural_failure_claims(self):
+        claims = {
+            "twitter-gallery-fallback": "x-natural-failure-observed",
+            "tiktok-gallery-fallback": "tiktok-natural-failure-observed",
+        }
+        for case_id, claim in claims.items():
+            receipt = self.registered_controlled_fallback_receipt(case_id)
+            receipt["assertions"].append(
+                {"name": claim, "passed": True}
+            )
+            with self.subTest(case_id=case_id, claim=claim):
+                with self.assertRaises(
+                    smoke_receipts.ContractError
+                ) as raised:
+                    self.validate_receipt_value(receipt)
+                self.assertEqual(
+                    raised.exception.code,
+                    "SMOKE_CASE_MISMATCH",
+                )
+
+    def test_controlled_fallback_receipt_cannot_impersonate_other_case(self):
+        case_ids = sorted(run_smoke.CONTROLLED_FAULT_BINDINGS)
+        for source_case_id, target_case_id in (
+            (case_ids[0], case_ids[1]),
+            (case_ids[1], case_ids[0]),
+        ):
+            receipt = self.registered_controlled_fallback_receipt(
+                source_case_id
+            )
+            receipt["case_id"] = target_case_id
+            with self.subTest(
+                source_case_id=source_case_id,
+                target_case_id=target_case_id,
+            ):
+                with self.assertRaises(
+                    smoke_receipts.ContractError
+                ) as raised:
+                    self.validate_receipt_value(receipt)
+                self.assertEqual(
+                    raised.exception.code,
+                    "SMOKE_CASE_MISMATCH",
+                )
+
+    def test_nonfault_case_cannot_spoof_controlled_fallback_evidence(self):
+        for _, fault_profile in run_smoke.CONTROLLED_FAULT_BINDINGS.values():
+            receipt = self.registered_download_receipt()
+            receipt["warnings"].append(run_smoke.CONTROLLED_FAULT_WARNING)
+            receipt["tools"].append(
+                {
+                    "name": run_smoke.CONTROLLED_FAULT_TOOL,
+                    "version": fault_profile,
+                }
+            )
+            receipt["assertions"].extend(
+                {"name": name, "passed": True}
+                for name in sorted(run_smoke.CONTROLLED_FAULT_ASSERTIONS)
+            )
+
+            with self.subTest(fault_profile=fault_profile):
+                with self.assertRaises(
+                    smoke_receipts.ContractError
+                ) as raised:
+                    self.validate_receipt_value(receipt)
+                self.assertEqual(
+                    raised.exception.code,
+                    "SMOKE_CASE_MISMATCH",
+                )
 
     def test_release_receipt_rejects_duplicate_tool_names(self):
         receipt = self.registered_download_receipt()
@@ -612,6 +1049,80 @@ class SmokeHarnessTests(unittest.TestCase):
                 "SMOKE_EVIDENCE_MISSING",
             )
 
+    def test_validate_cli_binds_one_receipt_to_the_requested_case(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = Path(smoke_receipts.__file__).resolve()
+            environment = dict(os.environ)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            receipt = self.registered_download_receipt()
+            receipt["implementation_digest"] = smoke_receipts.implementation_digest()
+            first = root / "first.json"
+            second = root / "second.json"
+            self.write_private_json(first, receipt)
+            self.write_private_json(second, receipt)
+
+            accepted = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    "--require-current-digest",
+                    "--require-single",
+                    "--require-case",
+                    "youtube-anonymous",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            wrong_case = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    "--require-single",
+                    "--require-case",
+                    "bilibili-anonymous",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(wrong_case.returncode, 2)
+            self.assertEqual(wrong_case.stdout, "")
+            self.assertEqual(
+                json.loads(wrong_case.stderr)["error"]["code"],
+                "SMOKE_CASE_MISMATCH",
+            )
+
+            multiple = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    str(first),
+                    str(second),
+                    "--require-single",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(multiple.returncode, 2)
+            self.assertEqual(multiple.stdout, "")
+            self.assertEqual(
+                json.loads(multiple.stderr)["error"]["code"],
+                "SMOKE_RECEIPT_SET_INVALID",
+            )
+
     def test_release_coverage_requires_every_registered_case(self):
         case_ids = set(smoke_receipts.load_case_registry())
         complete = [
@@ -627,8 +1138,16 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertEqual(coverage["required_case_count"], len(case_ids))
         self.assertEqual(coverage["covered_case_count"], len(case_ids))
 
+        without_twitter_fallback = [
+            receipt
+            for receipt in complete
+            if receipt["case_id"] != "twitter-gallery-fallback"
+        ]
+        self.assertEqual(len(without_twitter_fallback), len(complete) - 1)
         with self.assertRaises(smoke_receipts.ContractError) as raised:
-            smoke_receipts.validate_required_case_coverage(complete[:-1])
+            smoke_receipts.validate_required_case_coverage(
+                without_twitter_fallback
+            )
         self.assertEqual(raised.exception.code, "SMOKE_EVIDENCE_MISSING")
 
     def test_registered_case_platform_and_engine_mismatches_are_rejected(self):
@@ -707,8 +1226,82 @@ class SmokeHarnessTests(unittest.TestCase):
             self.assertEqual(loaded["source"]["fingerprint"], "0" * 64)
             self.assertEqual(loaded["warnings"], ["registered-source-environment-missing"])
 
+    def test_long_resume_uses_secure_canonical_temporary_path_identity(self):
+        alias = Path(
+            "/var/folders/fixture/awesome-capture-smoke-external-long-resume"
+        )
+        canonical = Path(
+            "/private/var/folders/fixture/"
+            "awesome-capture-smoke-external-long-resume"
+        )
+        temporary_context = mock.MagicMock()
+        temporary_context.__enter__.return_value = str(alias)
+        temporary_context.__exit__.return_value = False
+        details = {
+            "source": {
+                "platform": "local",
+                "fingerprint": "0" * 64,
+                "auth_mode": "not-applicable",
+                "fallback": None,
+            },
+            "engine": None,
+            "artifacts": [],
+            "assertions": [
+                {"name": "partial-chunk-state-observed", "passed": False}
+            ],
+            "warnings": ["partial-chunk-state-not-observed"],
+            "tools": [],
+        }
+
+        with tempfile.TemporaryDirectory() as receipt_temporary:
+            receipt_dir = Path(receipt_temporary) / "receipts"
+            with (
+                mock.patch.object(
+                    run_smoke.tempfile,
+                    "TemporaryDirectory",
+                    return_value=temporary_context,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "secure_mkdirs",
+                    return_value=canonical,
+                ) as secure_work_dir,
+                mock.patch.object(
+                    run_smoke,
+                    "_transcription_case",
+                    return_value=details,
+                ) as transcription_case,
+                mock.patch.object(run_smoke, "_commit_sha", return_value="b" * 40),
+                mock.patch.object(
+                    run_smoke, "implementation_digest", return_value="c" * 64
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_environment",
+                    return_value={
+                        "os": "macos",
+                        "arch": "arm64",
+                        "python": "3.14.0",
+                    },
+                ),
+            ):
+                receipt, path = run_smoke.run_case(
+                    "external-long-resume",
+                    receipt_dir=receipt_dir,
+                    environ={
+                        "AWESOME_CAPTURE_SMOKE_LONG_MEDIA": "/local/source.wav",
+                        "AWESOME_CAPTURE_SMOKE_EXTERNAL_MODEL": "/local/model",
+                        "AWESOME_CAPTURE_SMOKE_EXTERNAL_ADAPTER": "/local/adapter",
+                    },
+                )
+            self.assertTrue(path.is_file())
+
+        self.assertEqual(receipt["outcome"], "fail")
+        secure_work_dir.assert_called_once_with(alias)
+        self.assertEqual(transcription_case.call_args.args[4], canonical)
+
     def test_download_error_code_is_normalized_in_failure_receipt(self):
-        canonical_url = "https://www.youtube.com/watch?v=public"
+        canonical_url = "https://www.youtube.com/watch?v=4biXYSNkn9Y"
         fingerprint = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
 
         def fake_runner(command, **unused):
@@ -721,6 +1314,7 @@ class SmokeHarnessTests(unittest.TestCase):
                             "status": "ok",
                             "operation": "detect",
                             "platform": "youtube",
+                            "sanitized_url": canonical_url,
                             "source_fingerprint": fingerprint,
                         }
                     ),
@@ -780,6 +1374,9 @@ class SmokeHarnessTests(unittest.TestCase):
 
     def test_anonymous_case_records_unexpected_fallback_as_failed_assertion(self):
         case = run_smoke.select_case("twitter-anonymous")
+        canonical_url = (
+            "https://x.com/maomao_acrypto/status/2081741144799498330"
+        )
         artifact = {
             "source": {
                 "platform": "twitter",
@@ -799,7 +1396,12 @@ class SmokeHarnessTests(unittest.TestCase):
             mock.patch.object(
                 run_smoke,
                 "_detect_download_source",
-                return_value=("twitter", "a" * 64, True),
+                return_value=(
+                    "twitter",
+                    canonical_url,
+                    case["source_fingerprint"],
+                    True,
+                ),
             ),
             mock.patch.object(
                 run_smoke,
@@ -827,7 +1429,7 @@ class SmokeHarnessTests(unittest.TestCase):
         ):
             details = run_smoke._download_case(
                 case,
-                "https://x.com/public/status/1",
+                canonical_url,
                 Path("/private/tmp/unused-smoke-work"),
                 runner=mock.Mock(),
             )
@@ -836,6 +1438,813 @@ class SmokeHarnessTests(unittest.TestCase):
             item["name"]: item["passed"] for item in details["assertions"]
         }
         self.assertFalse(assertions["anonymous-route-observed"])
+
+    def test_registered_source_mismatch_stops_before_any_download(self):
+        case = run_smoke.select_case("twitter-gallery-fallback")
+        canonical_source = (
+            "https://twitter.com/video/status/745240047289458688"
+        )
+        different_source = (
+            "https://twitter.com/video/status/745240047289458689"
+        )
+        scenarios = {
+            "fingerprint": {
+                "source": different_source,
+                "sanitized_source": different_source,
+                "fingerprint": hashlib.sha256(
+                    different_source.encode("utf-8")
+                ).hexdigest(),
+                "failed_assertion": "registered-source-fingerprint-matches",
+                "warning": "registered-source-fingerprint-mismatch",
+            },
+            "canonical-source": {
+                "source": f"{canonical_source}?s=20",
+                "sanitized_source": canonical_source,
+                "fingerprint": case["source_fingerprint"],
+                "failed_assertion": "registered-source-is-canonical",
+                "warning": "registered-source-not-canonical",
+            },
+            "inconsistent-detector-fingerprint": {
+                "source": canonical_source,
+                "sanitized_source": canonical_source,
+                "fingerprint": "f" * 64,
+                "failed_assertion": "registered-source-detected",
+                "warning": "registered-source-detection-failed",
+            },
+        }
+
+        for name, scenario in scenarios.items():
+            calls: list[list[str]] = []
+
+            def detector_only_runner(command, **unused):
+                calls.append(list(command))
+                if "detect" not in command:
+                    raise AssertionError(
+                        "download boundary was reached after source mismatch"
+                    )
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=json.dumps(
+                        {
+                            "status": "ok",
+                            "operation": "detect",
+                            "platform": "twitter",
+                            "sanitized_url": scenario["sanitized_source"],
+                            "source_fingerprint": scenario["fingerprint"],
+                        }
+                    ),
+                    stderr="",
+                )
+
+            with self.subTest(name=name):
+                with (
+                    mock.patch.object(run_smoke, "collect_tools", return_value=[]),
+                    mock.patch.object(
+                        run_smoke,
+                        "_tool_version",
+                        return_value={"name": "yt-dlp", "version": "fixture"},
+                    ),
+                    mock.patch.object(
+                        run_smoke,
+                        "_controlled_fallback_runner",
+                        side_effect=AssertionError(
+                            "controlled downloader must not be constructed"
+                        ),
+                    ) as controlled_runner,
+                ):
+                    details = run_smoke._download_case(
+                        case,
+                        str(scenario["source"]),
+                        Path("/private/tmp/unused-smoke-work"),
+                        runner=detector_only_runner,
+                    )
+
+                assertions = {
+                    item["name"]: item["passed"]
+                    for item in details["assertions"]
+                }
+                self.assertFalse(assertions[str(scenario["failed_assertion"])])
+                self.assertEqual(
+                    details["warnings"],
+                    [scenario["warning"]],
+                )
+                self.assertEqual(details["artifacts"], [])
+                self.assertEqual(len(calls), 1)
+                self.assertIn("detect", calls[0])
+                controlled_runner.assert_not_called()
+
+    def test_tiktok_source_mismatch_stops_before_controlled_runner(self):
+        case = run_smoke.select_case("tiktok-gallery-fallback")
+        different_source = (
+            "https://www.tiktok.com/@catherineincode/video/"
+            "7666225293744426272"
+        )
+        different_fingerprint = hashlib.sha256(
+            different_source.encode("utf-8")
+        ).hexdigest()
+        calls: list[list[str]] = []
+
+        def detector_only_runner(command, **unused):
+            calls.append(list(command))
+            if "detect" not in command:
+                raise AssertionError(
+                    "download boundary was reached after source mismatch"
+                )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "status": "ok",
+                        "operation": "detect",
+                        "platform": "tiktok",
+                        "sanitized_url": different_source,
+                        "source_fingerprint": different_fingerprint,
+                    }
+                ),
+                stderr="",
+            )
+
+        with (
+            mock.patch.object(run_smoke, "collect_tools", return_value=[]),
+            mock.patch.object(
+                run_smoke,
+                "_tool_version",
+                return_value={"name": "yt-dlp", "version": "fixture"},
+            ),
+            mock.patch.object(
+                run_smoke,
+                "_controlled_fallback_runner",
+                side_effect=AssertionError(
+                    "controlled downloader must not be constructed"
+                ),
+            ) as controlled_runner,
+        ):
+            details = run_smoke._download_case(
+                case,
+                different_source,
+                Path("/private/tmp/unused-smoke-work"),
+                runner=detector_only_runner,
+            )
+
+        assertions = {
+            item["name"]: item["passed"] for item in details["assertions"]
+        }
+        self.assertFalse(
+            assertions["registered-source-fingerprint-matches"]
+        )
+        self.assertEqual(
+            details["warnings"],
+            ["registered-source-fingerprint-mismatch"],
+        )
+        self.assertEqual(len(calls), 1)
+        controlled_runner.assert_not_called()
+
+    def test_controlled_tool_snapshot_rejects_env_shebang_and_hardlink(self):
+        original_which = shutil.which
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env_script = root / "env-tool"
+            env_script.write_text(
+                "#!/usr/bin/env python3\nprint('unsafe')\n",
+                encoding="utf-8",
+            )
+            os.chmod(env_script, 0o755)
+
+            base_script = root / "base-tool"
+            base_script.write_text(
+                f"#!{sys.executable}\nprint('unsafe')\n",
+                encoding="utf-8",
+            )
+            os.chmod(base_script, 0o755)
+            linked_script = root / "linked-tool"
+            os.link(base_script, linked_script)
+
+            non_executable = root / "non-executable-tool"
+            non_executable.write_text(
+                f"#!{sys.executable}\nprint('unsafe')\n",
+                encoding="utf-8",
+            )
+            os.chmod(non_executable, 0o600)
+
+            for name, candidate in (
+                ("env-shebang", env_script),
+                ("hardlink", linked_script),
+                ("non-executable", non_executable),
+            ):
+                with self.subTest(name=name):
+                    with mock.patch.object(
+                        run_smoke.shutil,
+                        "which",
+                        side_effect=lambda requested, path=str(candidate): (
+                            path
+                            if requested == "gallery-dl"
+                            else original_which(requested)
+                        ),
+                    ):
+                        with self.assertRaises(run_smoke.SmokeError) as raised:
+                            run_smoke._snapshot_controlled_tool("gallery-dl")
+                    self.assertEqual(
+                        raised.exception.code,
+                        "UNSAFE_SMOKE_TOOL",
+                    )
+
+    def test_controlled_ytdlp_command_rejects_sensitive_option_injection(self):
+        executable = Path("/private/controlled-tools/yt-dlp")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = run_smoke.secure_mkdirs(Path(temporary))
+            output_dir = root / "output"
+            staging_parent = (
+                output_dir
+                / ".awesome-capture-media"
+                / "v2"
+                / "staging"
+            )
+            staging_parent.mkdir(parents=True, mode=0o700)
+            for parent in (
+                output_dir,
+                output_dir / ".awesome-capture-media",
+                output_dir / ".awesome-capture-media" / "v2",
+                staging_parent,
+            ):
+                os.chmod(parent, 0o700)
+            staging = staging_parent / "registered.0123456789abcdef"
+            staging.mkdir(mode=0o700)
+
+            sources = {
+                "twitter": (
+                    "https://twitter.com/video/status/745240047289458688"
+                ),
+                "tiktok": (
+                    "https://www.tiktok.com/@catherineincode/video/"
+                    "7666225293744426271"
+                ),
+            }
+            valid_commands: dict[str, list[str]] = {}
+            for platform_name, source in sources.items():
+                valid = [
+                    str(executable),
+                    "--ignore-config",
+                    "--no-playlist",
+                    "--use-extractors",
+                    "Twitter" if platform_name == "twitter" else "TikTok",
+                    "--socket-timeout",
+                    "20",
+                    "--retries",
+                    "3",
+                    "--fragment-retries",
+                    "3",
+                    "--no-warnings",
+                ]
+                if platform_name == "twitter":
+                    valid.append("--force-ipv4")
+                valid.extend(
+                    [
+                        "--part",
+                        "--no-overwrites",
+                        "--write-info-json",
+                        "--format",
+                        "bv*+ba/b",
+                        "--paths",
+                        "temp:.",
+                        "--output",
+                        "%(id)s--%(title).120B.%(ext)s",
+                        "--print",
+                        "after_move:%(filepath)j",
+                        source,
+                    ]
+                )
+                valid_commands[platform_name] = valid
+                with self.subTest(
+                    platform_name=platform_name,
+                    check="exact-command",
+                ):
+                    self.assertEqual(
+                        "--force-ipv4" in valid,
+                        platform_name == "twitter",
+                    )
+                    self.assertTrue(
+                        run_smoke._controlled_ytdlp_command_valid(
+                            valid,
+                            source=source,
+                            case_id=f"{platform_name}-gallery-fallback",
+                            output_dir=output_dir,
+                            executable=executable,
+                            pinned_cwd=staging,
+                        )
+                    )
+                injections = {
+                    "netrc": ["--netrc"],
+                    "header": [
+                        "--add-header",
+                        "Authorization: redacted",
+                    ],
+                    "exec": ["--exec", "false"],
+                    "cookies-equals": [
+                        "--cookies=/private/fixture-cookies.txt"
+                    ],
+                    "certificate-bypass": [
+                        "--no-check-certificates"
+                    ],
+                }
+                for name, injected in injections.items():
+                    with self.subTest(
+                        platform_name=platform_name,
+                        injection=name,
+                    ):
+                        command = [
+                            *valid[:-1],
+                            *injected,
+                            valid[-1],
+                        ]
+                        self.assertFalse(
+                            run_smoke._controlled_ytdlp_command_valid(
+                                command,
+                                source=source,
+                                case_id=(
+                                    f"{platform_name}-gallery-fallback"
+                                ),
+                                output_dir=output_dir,
+                                executable=executable,
+                                pinned_cwd=staging,
+                            )
+                        )
+
+            for platform_name, other_platform in (
+                ("twitter", "tiktok"),
+                ("tiktok", "twitter"),
+            ):
+                with self.subTest(
+                    platform_name=platform_name,
+                    impersonates=other_platform,
+                ):
+                    self.assertFalse(
+                        run_smoke._controlled_ytdlp_command_valid(
+                            valid_commands[other_platform],
+                            source=sources[other_platform],
+                            case_id=f"{platform_name}-gallery-fallback",
+                            output_dir=output_dir,
+                            executable=executable,
+                            pinned_cwd=staging,
+                        )
+                    )
+
+    def test_controlled_gallery_command_rejects_sensitive_option_injection(self):
+        executable = Path("/private/controlled-tools/gallery-dl")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = run_smoke.secure_mkdirs(Path(temporary))
+            output_dir = root / "output"
+            staging_parent = (
+                output_dir
+                / ".awesome-capture-media"
+                / "v2"
+                / "staging"
+            )
+            staging_parent.mkdir(parents=True, mode=0o700)
+            for parent in (
+                output_dir,
+                output_dir / ".awesome-capture-media",
+                output_dir / ".awesome-capture-media" / "v2",
+                staging_parent,
+            ):
+                os.chmod(parent, 0o700)
+            staging = staging_parent / "registered.0123456789abcdef"
+            staging.mkdir(mode=0o700)
+
+            sources = {
+                "twitter": (
+                    "https://twitter.com/video/status/745240047289458688"
+                ),
+                "tiktok": (
+                    "https://www.tiktok.com/@catherineincode/video/"
+                    "7666225293744426271"
+                ),
+            }
+            valid_commands: dict[str, list[str]] = {}
+            for platform_name, source in sources.items():
+                valid = [
+                    str(executable),
+                    "--config-ignore",
+                    "--no-input",
+                ]
+                if platform_name == "twitter":
+                    valid.append("--force-ipv4")
+                valid.extend(
+                    [
+                        "--range",
+                        "1",
+                        "-D",
+                        ".",
+                        "-f",
+                        "download.{extension}",
+                        source,
+                    ]
+                )
+                valid_commands[platform_name] = valid
+                with self.subTest(
+                    platform_name=platform_name,
+                    check="exact-command",
+                ):
+                    self.assertEqual(
+                        "--force-ipv4" in valid,
+                        platform_name == "twitter",
+                    )
+                    self.assertTrue(
+                        run_smoke._controlled_gallery_command_valid(
+                            valid,
+                            source=source,
+                            case_id=f"{platform_name}-gallery-fallback",
+                            output_dir=output_dir,
+                            executable=executable,
+                            pinned_cwd=staging,
+                        )
+                    )
+                injections = {
+                    "netrc": ["--netrc"],
+                    "header": [
+                        "--header",
+                        "Authorization: redacted",
+                    ],
+                    "exec": ["--exec", "false"],
+                    "cookies": [
+                        "--cookies",
+                        "/private/fixture-cookies.txt",
+                    ],
+                    "proxy": ["--proxy", "http://proxy.invalid"],
+                    "certificate-bypass": [
+                        "--no-check-certificate"
+                    ],
+                }
+                for injection_name, injected_arguments in injections.items():
+                    injected = [
+                        *valid[:-1],
+                        *injected_arguments,
+                        valid[-1],
+                    ]
+                    with self.subTest(
+                        platform_name=platform_name,
+                        injection=injection_name,
+                    ):
+                        self.assertFalse(
+                            run_smoke._controlled_gallery_command_valid(
+                                injected,
+                                source=source,
+                                case_id=(
+                                    f"{platform_name}-gallery-fallback"
+                                ),
+                                output_dir=output_dir,
+                                executable=executable,
+                                pinned_cwd=staging,
+                            )
+                        )
+
+            for platform_name, other_platform in (
+                ("twitter", "tiktok"),
+                ("tiktok", "twitter"),
+            ):
+                with self.subTest(
+                    platform_name=platform_name,
+                    impersonates=other_platform,
+                ):
+                    self.assertFalse(
+                        run_smoke._controlled_gallery_command_valid(
+                            valid_commands[other_platform],
+                            source=sources[other_platform],
+                            case_id=f"{platform_name}-gallery-fallback",
+                            output_dir=output_dir,
+                            executable=executable,
+                            pinned_cwd=staging,
+                        )
+                    )
+
+    def assert_controlled_fallback_runs_real_production_download_offline(
+        self,
+        *,
+        case_id: str,
+        source: str,
+        source_env: str,
+    ) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        self.assertIsNotNone(ffmpeg, "ffmpeg is required by the no-skip suite")
+        self.assertIsNotNone(ffprobe, "ffprobe is required by the no-skip suite")
+        assert ffmpeg is not None
+        assert ffprobe is not None
+
+        case = run_smoke.select_case(case_id)
+        platform_name, fault_profile = (
+            run_smoke.CONTROLLED_FAULT_BINDINGS[case_id]
+        )
+        self.assertEqual(case["platform"], platform_name)
+        self.assertEqual(case["fault_profile"], fault_profile)
+        self.assertEqual(
+            hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            case["source_fingerprint"],
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = run_smoke.secure_mkdirs(Path(temporary))
+            fixture = root / "fixture.mp4"
+            generated = subprocess.run(
+                [
+                    ffmpeg,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=32x32:d=0.25",
+                    "-an",
+                    "-c:v",
+                    "mpeg4",
+                    "-y",
+                    str(fixture),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            self.assertGreater(fixture.stat().st_size, 0)
+            os.chmod(fixture, 0o600)
+
+            tool_dir = root / "tools"
+            tool_dir.mkdir(mode=0o700)
+            yt_dlp = tool_dir / "yt-dlp"
+            yt_dlp.write_text(
+                (
+                    f"#!{sys.executable}\n"
+                    "import sys\n"
+                    "if sys.argv[1:] == ['--version']:\n"
+                    "    print('2026.07.04')\n"
+                    "    raise SystemExit(0)\n"
+                    "raise SystemExit(92)\n"
+                ),
+                encoding="utf-8",
+            )
+            os.chmod(yt_dlp, 0o755)
+
+            expected_gallery_arguments = [
+                "--config-ignore",
+                "--no-input",
+            ]
+            if platform_name == "twitter":
+                expected_gallery_arguments.append("--force-ipv4")
+            expected_gallery_arguments.extend(
+                [
+                    "--range",
+                    "1",
+                    "-D",
+                    ".",
+                    "-f",
+                    "download.{extension}",
+                    source,
+                ]
+            )
+            gallery_dl = tool_dir / "gallery-dl"
+            gallery_dl.write_text(
+                (
+                    f"#!{sys.executable}\n"
+                    "import shutil\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "if sys.argv[1:] == ['--version']:\n"
+                    "    print('1.32.8')\n"
+                    "    raise SystemExit(0)\n"
+                    f"expected = {expected_gallery_arguments!r}\n"
+                    "if sys.argv[1:] != expected:\n"
+                    "    raise SystemExit(91)\n"
+                    f"shutil.copyfile({str(fixture)!r}, "
+                    "Path.cwd() / 'download.mp4')\n"
+                ),
+                encoding="utf-8",
+            )
+            os.chmod(gallery_dl, 0o755)
+
+            original_which = shutil.which
+
+            def controlled_which(name):
+                if name == "yt-dlp":
+                    return str(yt_dlp)
+                if name == "gallery-dl":
+                    return str(gallery_dl)
+                return original_which(name)
+
+            output_dir = root / "output"
+            state = {
+                "fault_profile_applied": None,
+                "fault_trigger_count": 0,
+                "yt_dlp_command_verified": False,
+                "network_error_observed": False,
+                "fallback_gate_count": 0,
+                "fallback_gate_accepted": False,
+                "fallback_platform": None,
+                "gallery_execution_count": 0,
+                "gallery_command_verified": False,
+                "tool_identities_stable": False,
+            }
+            command = [
+                sys.executable,
+                str(run_smoke.DOWNLOAD_SCRIPT),
+                "download",
+                source,
+                "--output-dir",
+                str(output_dir),
+                "--lock-timeout",
+                "30",
+            ]
+            leaked_stdout = io.StringIO()
+            leaked_stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    run_smoke.shutil,
+                    "which",
+                    side_effect=controlled_which,
+                ),
+                mock.patch.object(sys, "stdout", leaked_stdout),
+                mock.patch.object(sys, "stderr", leaked_stderr),
+            ):
+                runner = run_smoke._controlled_fallback_runner(
+                    case_id=case_id,
+                    source=source,
+                    output_dir=output_dir,
+                    state=state,
+                )
+                process = runner(command)
+
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(process.stderr, "")
+            self.assertEqual(leaked_stdout.getvalue(), "")
+            self.assertEqual(leaked_stderr.getvalue(), "")
+            payload = run_smoke.loads_strict(
+                process.stdout,
+                max_bytes=4 * 1024 * 1024,
+            )
+            self.assertIsInstance(payload, dict)
+            artifact_path = Path(str(payload["artifact_path"]))
+            artifact = run_smoke.read_json_strict(
+                artifact_path,
+                expected="video-artifact",
+            )
+            run_smoke.validate_file_context(artifact)
+            self.assertTrue(
+                run_smoke._reverify_video_media(
+                    artifact,
+                    runner=subprocess.run,
+                )
+            )
+            self.assertEqual(artifact["producer"]["tool"], "gallery-dl")
+            self.assertEqual(artifact["acquisition"]["fallback"], "gallery-dl")
+            self.assertEqual(
+                artifact["source"]["fingerprint"],
+                case["source_fingerprint"],
+            )
+            self.assertIn(
+                "yt-dlp failed with NETWORK_ERROR; "
+                "used the bounded gallery-dl fallback.",
+                artifact["acquisition"]["warnings"],
+            )
+            self.assertEqual(state["fault_profile_applied"], fault_profile)
+            self.assertEqual(state["fault_trigger_count"], 1)
+            self.assertEqual(state["fallback_platform"], platform_name)
+            self.assertEqual(state["gallery_execution_count"], 1)
+            assertion_rows = run_smoke._controlled_fault_assertion_rows(
+                case=case,
+                state=state,
+                artifact=artifact,
+                artifact_path=artifact_path,
+                output_dir=output_dir,
+            )
+            self.assertEqual(
+                {item["name"] for item in assertion_rows},
+                run_smoke.CONTROLLED_FAULT_ASSERTIONS,
+            )
+            self.assertTrue(all(item["passed"] for item in assertion_rows))
+
+            def local_production_runner(command, **options):
+                if "detect" in command or command[0] == "ffprobe":
+                    return subprocess.run(command, **options)
+                raise AssertionError(
+                    f"unexpected outer smoke command: {command[0]}"
+                )
+
+            versions = {
+                "ffmpeg": "8.1",
+                "ffprobe": "8.1",
+                "yt-dlp": "2026.07.04",
+                "gallery-dl": "1.32.8",
+            }
+
+            def fixture_tool_version(name, unused_command):
+                return {
+                    "name": name,
+                    "version": versions.get(name, "fixture"),
+                }
+
+            receipt_dir = root / "receipts"
+            with (
+                mock.patch.object(
+                    run_smoke.shutil,
+                    "which",
+                    side_effect=controlled_which,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_tool_version",
+                    side_effect=fixture_tool_version,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_commit_sha",
+                    return_value="a" * 40,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "implementation_digest",
+                    return_value="b" * 64,
+                ),
+                mock.patch.object(
+                    run_smoke,
+                    "_environment",
+                    return_value={
+                        "os": "linux",
+                        "arch": "x86_64",
+                        "python": "3.14.0",
+                    },
+                ),
+            ):
+                receipt, receipt_path = run_smoke.run_case(
+                    case_id,
+                    receipt_dir=receipt_dir,
+                    environ={source_env: source},
+                    runner=local_production_runner,
+                )
+
+            self.assertEqual(receipt["outcome"], "pass")
+            self.assertTrue(receipt_path.is_file())
+            self.assertEqual(stat.S_IMODE(receipt_path.stat().st_mode), 0o600)
+            self.assertEqual(
+                receipt["source"]["fingerprint"],
+                case["source_fingerprint"],
+            )
+            receipt_assertions = {
+                item["name"]: item["passed"]
+                for item in receipt["assertions"]
+            }
+            self.assertTrue(
+                all(
+                    receipt_assertions[name]
+                    for name in run_smoke.CONTROLLED_FAULT_ASSERTIONS
+                )
+            )
+            fault_tool = next(
+                item
+                for item in receipt["tools"]
+                if item["name"] == run_smoke.CONTROLLED_FAULT_TOOL
+            )
+            self.assertEqual(fault_tool["version"], fault_profile)
+            validated_receipt = smoke_receipts.validate_receipt(
+                receipt_path,
+                require_pass=True,
+                require_current_digest=False,
+            )
+            self.assertEqual(
+                validated_receipt["case_id"],
+                case_id,
+            )
+            serialized_receipt = receipt_path.read_text(encoding="utf-8")
+            for private_value in (
+                source,
+                str(root),
+                str(yt_dlp),
+                str(gallery_dl),
+                "download.mp4",
+            ):
+                with self.subTest(private_value=private_value):
+                    self.assertNotIn(private_value, serialized_receipt)
+
+    def test_x_controlled_fallback_runs_real_production_download_offline(self):
+        self.assert_controlled_fallback_runs_real_production_download_offline(
+            case_id="twitter-gallery-fallback",
+            source="https://twitter.com/video/status/745240047289458688",
+            source_env="AWESOME_CAPTURE_SMOKE_TWITTER_GALLERY_URL",
+        )
+
+    def test_tiktok_controlled_fallback_runs_real_production_download_offline(
+        self,
+    ):
+        self.assert_controlled_fallback_runs_real_production_download_offline(
+            case_id="tiktok-gallery-fallback",
+            source=(
+                "https://www.tiktok.com/@catherineincode/video/"
+                "7666225293744426271"
+            ),
+            source_env="AWESOME_CAPTURE_SMOKE_TIKTOK_GALLERY_URL",
+        )
 
     def test_cli_interrupt_uses_sanitized_json_protocol(self):
         stdout = io.StringIO()
@@ -862,7 +2271,7 @@ class SmokeHarnessTests(unittest.TestCase):
         self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_successful_fake_download_generates_content_hash_only_receipt(self):
-        canonical_url = "https://www.youtube.com/watch?v=public"
+        canonical_url = "https://www.youtube.com/watch?v=4biXYSNkn9Y"
         fingerprint = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
 
         def fake_runner(command, **unused):
@@ -1017,7 +2426,7 @@ class SmokeHarnessTests(unittest.TestCase):
             run_smoke.validate_contract(receipt, expected="smoke-receipt")
 
     def test_independent_ffprobe_mismatch_fails_media_assertion_and_receipt(self):
-        canonical_url = "https://www.youtube.com/watch?v=public"
+        canonical_url = "https://www.youtube.com/watch?v=4biXYSNkn9Y"
         fingerprint = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
 
         def fake_runner(command, **unused):
@@ -1426,16 +2835,18 @@ class SmokeHarnessTests(unittest.TestCase):
     def test_workflow_has_only_case_input_and_no_credentials(self):
         workflow = (ROOT / ".github/workflows/smoke.yml").read_text(encoding="utf-8")
         inputs = workflow.split("permissions:", 1)[0]
+        configured_cases = re.findall(r"(?m)^          - ([a-z0-9-]+)$", inputs)
+        registered_cases = [case["case_id"] for case in run_smoke.load_cases()]
         self.assertIn("case:", inputs)
         self.assertNotIn("url:", inputs.lower())
         self.assertNotIn("cookie", workflow.lower())
         self.assertNotIn("cookies-from-browser", workflow.lower())
         self.assertNotIn("browser_path", workflow.lower())
+        self.assertNotIn("fault", inputs.lower())
         self.assertNotIn("download model", workflow.lower())
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("tools/run_smoke.py run \"$SMOKE_CASE\"", workflow)
-        for case in run_smoke.load_cases():
-            self.assertIn(case["case_id"], workflow)
+        self.assertCountEqual(configured_cases, registered_cases)
 
 
 if __name__ == "__main__":
