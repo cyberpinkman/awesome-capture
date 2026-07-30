@@ -1,0 +1,7 @@
+{
+  "schema_version": "awesome-capture.smoke-release-scope/v1",
+  "base_commit": "f0f4c46f07aa1b508f7dac5e1586b25fbb879009",
+  "base_version": "0.1.0",
+  "external_impact": "selected",
+  "required_components": ["download"]
+}

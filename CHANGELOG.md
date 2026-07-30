@@ -11,8 +11,22 @@
 - 建立公开 Pull Request 贡献规范、证据矩阵和 PR 模板，明确分支工作流、
   contract/smoke/安全要求、CI 失败处理及最终 head SHA 合并门槛。
 
+### Changed
+
+- 正式发布 smoke 门禁改为读取候选 commit 中可审查的 component scope，只对
+  受影响的平台或 ASR 引擎要求完整且匹配当前 digest 的 passing receipt；
+  scope 绑定 changelog 中紧邻的更低 release 版本与不可移动 tag（未曾创建
+  tag/Release 的 `0.1.0` 历史版本边界使用一次性固定 commit SHA），并且不能
+  缩小由执行脚本、skill 行为规范、case registry 和 contract 差异保守推导的
+  最低组件集合；
+  所有已提交 receipt 仍逐份执行 schema、语义、脱敏、已注册 case 与 outcome
+  校验，不再因无关组件缺少证据而阻止发布。
+
 ### Fixed
 
+- README 与安全策略不再把尚未创建的 `v0.1.0` tag/Release 当作稳定安装或
+  维护入口；首个正式 Release 前改为公开 `main` 加完整 commit SHA 的准确
+  指引。
 - macOS smoke harness 通过 POSIX 安全运行层统一固定的 `/var`、`/tmp` 系统别名，
   避免长转写崩溃续跑因临时目录与 chunk manifest 路径拼写不同而误判失败。
 - X 的两条发布证据现在分工明确：`twitter-anonymous` 验证真实 `yt-dlp`
@@ -113,12 +127,12 @@
 ### Migration
 
 - 本版本不提供旧 artifact、state 或 receipt 的原地迁移。请先备份旧输出和
-  vault，再将 `v0.1.0` 的四个 skills 作为同一版本安装。
+  vault，再从同一个、版本元数据为 `0.1.0` 的 commit 安装四个 skills。
 - 在新的空输出目录中重新下载或转写，以生成 v2 artifact 和 v1 state；
   URL 工作流须显式传递下载 artifact。
 - Vault config 仍使用 `awesome-capture.vault-config/v1`。发现 legacy
   receipt 时工具会阻止复用或覆盖；请人工审阅后选择新的 vault/目标路径，
   或按自己的备份与数据保留策略处理旧数据。
 
-[Unreleased]: https://github.com/cyberpinkman/awesome-capture/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/cyberpinkman/awesome-capture/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cyberpinkman/awesome-capture/compare/f0f4c46f07aa1b508f7dac5e1586b25fbb879009...HEAD
+[0.1.0]: https://github.com/cyberpinkman/awesome-capture/commit/f0f4c46f07aa1b508f7dac5e1586b25fbb879009

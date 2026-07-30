@@ -116,6 +116,23 @@ class RepositoryStructureTests(unittest.TestCase):
         )
         self.assertIn("pull_request:", workflow)
 
+    def test_public_install_and_security_status_match_remote_release_state(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        self.assertIn("尚未创建 Git tag", readme)
+        self.assertIn("git clone --branch main --depth 1", readme)
+        self.assertIn("git rev-parse HEAD", readme)
+        self.assertNotIn("--branch v0.1.0", readme)
+        self.assertNotIn("releases/latest", readme)
+
+        self.assertIn("尚未创建首个 GitHub Release", security)
+        self.assertIn("完整 commit SHA", security)
+        self.assertNotIn("releases/latest", security)
+
+        self.assertIn("未创建 tag/Release 的历史 SemVer 版本边界", agents)
+
 
 if __name__ == "__main__":
     unittest.main()

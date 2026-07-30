@@ -64,6 +64,8 @@ URL、Cookie、媒体、模型、transcript 或日志。不适用时写“不适
 - Case alias：
 - Receipt/验证结果：
 - Auth/fallback/warnings：
+- Release scope / baseline / machine-inferred components
+  （仅 release preparation；否则写“不适用”）：
 
 ## 安全与公开性
 
@@ -72,6 +74,10 @@ URL、Cookie、媒体、模型、transcript 或日志。不适用时写“不适
 - [ ] 若涉及输出或错误：已验证脱敏、权限、no-clobber 与失败关闭规则
 - [ ] 若涉及文件系统：已验证 symlink、hardlink、路径交换、并发和恢复风险
 - [ ] 若涉及真实 smoke：fork/PR ref 未接触持久 runner，receipt 上传前已复验
+- [ ] 若为 release preparation：`smoke/release-scope.json` 已按相对上一
+      release 的实际外部影响审查；baseline 是 changelog 中紧邻的更低版本并
+      由对应不可移动 tag（或未打 tag 的 `0.1.0` 固定 bootstrap SHA）锁定，
+      且未通过 workflow 输入缩小范围
 
 ## Changelog 与文档
 

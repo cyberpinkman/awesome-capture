@@ -53,6 +53,17 @@ Awesome Capture 对整个仓库使用一个锁步的
 | `implementation_digest` | 64 位 SHA-256 | smoke receipt 所验证实现范围的精确身份 |
 | Commit SHA | Git object ID | 仓库某一次不可歧义的源码快照 |
 
+`smoke/release-scope.json` 是候选 commit 中可审查的发布证据范围，不是新的
+产品版本或 wire schema。它按 suite、平台或引擎选择必须提供当前 passing
+receipt 的 case，并用 `base_version`、`base_commit` 绑定上一完整 release
+边界。正式候选要求基线版本严格更低、恰为 changelog 中紧邻的上一版本，并由
+对应不可移动轻量 tag 精确指向；仅自动发布流程建立前记录、未曾创建
+tag/Release 的 `0.1.0` 历史版本边界使用代码中固定完整 SHA 的一次性
+bootstrap。门禁会从该基线到候选 `HEAD` 推导执行面变化的最低组件集合，
+scope 只能扩大该集合。Scope 文件本身参与 `implementation_digest`，因此
+缩小或扩大范围都会使旧 receipt 失去“当前实现”资格，必须在最终 scope
+固定后生成证据。
+
 因此，`artifact/v2` 不表示仓库是 `v2.0.0`，仓库版本也不决定 artifact
 版本。Schema 版本表达数据兼容边界；digest 用于逐字节复验；SemVer 面向使用
 者表达整个发行包的兼容性。当前严格消费者要求自己的 `contract_digest` 与

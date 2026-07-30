@@ -2,10 +2,12 @@
 
 ## 支持版本
 
-除具体 release notes 另有说明外，安全修复以
-[最新 GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases/latest)
-为维护目标。`main` 是未发布开发分支，不应作为稳定版本安装。报告问题时请
-同时提供受影响的 release tag；版本兼容与支持规则见
+仓库尚未创建首个 GitHub Release。在此之前，安全修复以公开 `main` 的最新
+commit 为维护目标；`main` 会继续变化，不构成不可移动稳定版本。报告问题时
+请提供受影响代码的完整 commit SHA。首个 Release 建立后，除具体 release
+notes 另有说明外，维护目标切换为
+[最新 GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)，
+报告时同时提供 release tag；版本兼容与支持规则见
 [`VERSIONING.md`](VERSIONING.md)。
 
 ## 报告安全问题
