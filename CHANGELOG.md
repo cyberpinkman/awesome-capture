@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-31
+
 ### Added
 
 - 建立公开 Pull Request 贡献规范、证据矩阵和 PR 模板，明确分支工作流、
@@ -24,9 +26,8 @@
 
 ### Fixed
 
-- README 与安全策略不再把尚未创建的 `v0.1.0` tag/Release 当作稳定安装或
-  维护入口；首个正式 Release 前改为公开 `main` 加完整 commit SHA 的准确
-  指引。
+- README 与安全策略把稳定安装和维护入口固定到首个不可移动的 `v0.1.1`
+  GitHub Release，不再把不存在的 `v0.1.0` tag 或浮动的 `main` 当作稳定版。
 - macOS smoke harness 通过 POSIX 安全运行层统一固定的 `/var`、`/tmp` 系统别名，
   避免长转写崩溃续跑因临时目录与 chunk manifest 路径拼写不同而误判失败。
 - X 的两条发布证据现在分工明确：`twitter-anonymous` 验证真实 `yt-dlp`
@@ -134,5 +135,6 @@
   receipt 时工具会阻止复用或覆盖；请人工审阅后选择新的 vault/目标路径，
   或按自己的备份与数据保留策略处理旧数据。
 
-[Unreleased]: https://github.com/cyberpinkman/awesome-capture/compare/f0f4c46f07aa1b508f7dac5e1586b25fbb879009...HEAD
+[Unreleased]: https://github.com/cyberpinkman/awesome-capture/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/cyberpinkman/awesome-capture/compare/f0f4c46f07aa1b508f7dac5e1586b25fbb879009...v0.1.1
 [0.1.0]: https://github.com/cyberpinkman/awesome-capture/commit/f0f4c46f07aa1b508f7dac5e1586b25fbb879009
