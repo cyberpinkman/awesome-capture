@@ -1127,9 +1127,21 @@ class SmokeHarnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             receipts_dir = Path(temporary) / "receipts"
             receipts_dir.mkdir()
+            self_baseline_scope = {
+                "schema_version": smoke_receipts.RELEASE_SCOPE_SCHEMA,
+                "base_commit": "0" * 40,
+                "base_version": smoke_receipts.version_at_head(),
+                "external_impact": "none",
+                "required_components": [],
+            }
             stdout = io.StringIO()
             stderr = io.StringIO()
             with (
+                mock.patch.object(
+                    smoke_receipts,
+                    "load_release_scope",
+                    return_value=self_baseline_scope,
+                ),
                 mock.patch.object(sys, "stdout", stdout),
                 mock.patch.object(sys, "stderr", stderr),
             ):

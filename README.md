@@ -30,10 +30,10 @@
 > 安全支持范围：macOS / Linux（POSIX），Python 3.11–3.14。
 > 当前能力边界：单个公开视频、本地音视频、本地 Obsidian vault；不支持 DRM、付费、私密内容或登录绕过。
 
-仓库已经公开，当前版本元数据为 `0.1.0`，但尚未创建 Git tag 或
-[GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)；
-因此目前没有可声明为稳定、不可变的 release tag。`main` 是公开开发分支，
-可能继续变化；当前使用者应记录实际检出的 commit SHA。
+最新稳定版本为
+[`v0.1.1`](https://github.com/cyberpinkman/awesome-capture/releases/tag/v0.1.1)。
+`main` 是公开开发分支，可能包含尚未发布的变化；需要可复现安装时请固定到
+Release tag，并记录实际检出的完整 commit SHA。
 
 [贡献指南](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) ·
 [版本策略](VERSIONING.md) · [发布流程](RELEASING.md) ·
@@ -135,16 +135,15 @@ plan → 用户确认 → build → audit
 ### 1. 获取当前公开源码
 
 ```bash
-git clone --branch main --depth 1 \
+git clone --branch v0.1.1 --depth 1 \
   https://github.com/cyberpinkman/awesome-capture.git
 cd awesome-capture
 git rev-parse HEAD
 ```
 
-请保存最后一条命令输出的完整 SHA，作为本次安装的精确代码身份。仓库创建
-首个正式 [GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)
-后，稳定安装将改为检出对应不可移动 tag；在此之前不要把浮动的 `main`
-描述成可复现稳定版。
+请保存最后一条命令输出的完整 SHA，作为本次安装的精确代码身份。稳定安装
+应检出 [GitHub Release](https://github.com/cyberpinkman/awesome-capture/releases)
+对应的不可移动 tag；不要把浮动的 `main` 描述成可复现稳定版。
 
 ### 2. 注册到 Codex
 
