@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "sha256": "2fe2d1a7a750bc583ce2d6b9ff6acd2e7a03bf5e5093f2d28f65dfa077bbcb2e",
+      "sha256": "846588ceca2c06fd96ab4b068a3d0f771575e4744db0544eaf9ffd9f19bd07df",
       "type": "video-artifact"
     }
   ],
@@ -44,15 +44,15 @@
     }
   ],
   "case_id": "douyin-ephemeral-browser",
-  "commit_sha": "47422cc7402c24de5639700ebf0e5c82b895efcd",
-  "created_at": "2026-07-29T17:08:46+00:00",
+  "commit_sha": "e867c53b1629c3d0d880a7d3f5560e952e27571d",
+  "created_at": "2026-07-31T08:14:10+00:00",
   "engine": null,
   "environment": {
     "arch": "arm64",
     "os": "macos",
     "python": "3.14.6"
   },
-  "implementation_digest": "7cc24980ab69282575d8752634de5bc102d2c445951693976c1a98badc0481aa",
+  "implementation_digest": "3e4f444286dae11941b141e91df5b2bfe75033a02f43fdac5bae2f99745d96a9",
   "outcome": "pass",
   "schema_version": "awesome-capture.smoke-receipt/v1",
   "source": {
