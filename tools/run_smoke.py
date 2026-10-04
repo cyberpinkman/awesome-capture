@@ -670,7 +670,6 @@ def _controlled_ytdlp_command_valid(
         "3",
         "--fragment-retries",
         "3",
-        "--no-warnings",
     ]
     if platform_name == "twitter":
         expected.append("--force-ipv4")

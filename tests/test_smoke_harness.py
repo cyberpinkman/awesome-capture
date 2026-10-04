@@ -2352,7 +2352,6 @@ class SmokeHarnessTests(unittest.TestCase):
                     "3",
                     "--fragment-retries",
                     "3",
-                    "--no-warnings",
                 ]
                 if platform_name == "twitter":
                     valid.append("--force-ipv4")
@@ -2392,6 +2391,7 @@ class SmokeHarnessTests(unittest.TestCase):
                         )
                     )
                 injections = {
+                    "hidden-diagnostics": ["--no-warnings"],
                     "netrc": ["--netrc"],
                     "header": [
                         "--add-header",

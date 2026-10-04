@@ -6,7 +6,7 @@
 |---|---|---:|---|
 | YouTube | `youtube.com`, `youtu.be` | Yes | Explicit cookie file/browser session |
 | Bilibili | `bilibili.com`, `b23.tv` | Yes | Explicit fresh browser session when HTTP 412 occurs |
-| Douyin | `douyin.com`, `iesdouyin.com` | Yes | Isolated anonymous Chromium cookies, then explicitly authorized user session |
+| Douyin | `douyin.com`, `iesdouyin.com` | Yes | Isolated anonymous cookies, then verified public webpage media; user session only with explicit authorization |
 | TikTok | `tiktok.com` | Yes | `gallery-dl` once for recoverable failures; otherwise session/network action |
 | X/Twitter | `x.com`, `twitter.com` | Yes | Explicit session for restricted posts |
 
@@ -17,11 +17,40 @@ address-family route repeatedly ended X media downloads with a TLS
 validation completed over IPv4. The option is scoped to X/Twitter; it neither
 disables TLS verification nor changes TikTok or other platforms.
 
-The isolated Douyin fallback waits 15 seconds by default. In the 2026-07-27
-smoke test, a 5-second initialization still produced cookies but yt-dlp rejected
-them as not fresh enough; 15 seconds produced a verified 15.068-second MP4.
-Keep the wait configurable instead of assuming every network completes the
-anti-bot initialization at the same speed.
+## Douyin links and anonymous fallback
+
+`detect` stays offline and fingerprints the sanitized input. `probe` and
+`download` resolve `v.douyin.com` short links and `iesdouyin.com/share/video/`
+links to `https://www.douyin.com/video/<id>` before invoking the restricted
+Douyin extractor. Redirects are bounded and validated; unrelated destinations,
+missing video IDs, and unsafe addresses are rejected. Artifacts retain the input
+as `source.url` and record the resolved page separately in `source.webpage_url`.
+
+Douyin's upstream `FRESH_COOKIES_REQUIRED` can mean the detail extractor returned
+no usable video data; it is not proof that this public video requires a login.
+In default `auto` mode, this error triggers anonymous cookies from isolated
+Chromium and one yt-dlp retry. Eligible extraction failures, including an initial
+`DOWNLOAD_FAILED`, may use one isolated anonymous browser session to read details
+matching the requested video ID and obtain its public media. A generic download
+failure does not require a Cookie retry first.
+
+The webpage-media route accepts only complete MP4 media from HTTPS
+`douyinvod.com` hosts listed in the target video's details, up to 1 GiB per file.
+`--quality 1080p` and `720p` select by video height, as in the yt-dlp route;
+`best` has no height ceiling. Before publication, the script requires complete
+HTTP media bytes, consistent video identity and duration, and the usual local
+hash/ffprobe checks. A player source that cannot be bound to the target video or
+an incomplete byte range fails closed. It never substitutes a recommended video,
+thumbnail, or unverified file.
+
+Both browser routes use `auth_mode` and `fallback` of `ephemeral_browser`. The
+webpage-media route additionally records `producer.tool: playwright` and an
+explanatory warning. Signed CDN URLs and raw page responses are not published.
+The browser has a fresh context, never reads a personal profile, and removes
+temporary cookies. The initial cookie fallback waits 15 seconds by default;
+the wait remains configurable because page initialization varies by network.
+Explicit login, private, unavailable, geo-restricted, and rate-limited responses
+stop the flow; browser playback is not an authorization bypass.
 
 ## Required tools
 
@@ -31,7 +60,8 @@ anti-bot initialization at the same speed.
 - `yt-dlp[default,curl-cffi,deno]`: use 2026.07.04 or newer because extractors and security fixes change with the platforms.
 - `ffmpeg` and `ffprobe`: merge formats and verify that the result contains a playable video stream.
 - `deno`: use as yt-dlp's JavaScript runtime for YouTube challenges.
-- `playwright` plus its Chromium browser: optional, isolated Douyin anonymous-session fallback.
+- `playwright` plus its Chromium browser: optional, isolated Douyin anonymous
+  cookie and public webpage-media fallbacks.
 - `gallery-dl` 1.32.8 or newer: optional TikTok/X fallback only.
 - `curl_cffi`: use only where the extractor recommends impersonation. Do not force impersonation globally because yt-dlp warns that doing so can reduce stability.
 
@@ -65,9 +95,9 @@ date-based builds older than 90 days as stale. It also reports
 A warning is not proof that every extractor is broken, but production
 diagnosis must first use a current, smoke-tested version.
 
-`detect` persists or prints only public query keys. `probe` performs network
-metadata extraction without downloading media; it is diagnostic evidence, not
-a successful download artifact.
+`detect` persists or prints only public query keys. `probe` resolves supported
+Douyin links and performs network metadata extraction without downloading media;
+it is diagnostic evidence, not a successful download artifact.
 
 ## Secure download and recovery
 
@@ -113,9 +143,10 @@ preseeded gallery-dl file are rejected rather than adopted.
 
 ## Error policy
 
-- `FRESH_COOKIES_REQUIRED`: for Douyin, allow the one isolated anonymous
-  Chromium retry first; if it still fails, request explicit permission for a
-  named Cookie source.
+- `FRESH_COOKIES_REQUIRED`: for Douyin, allow the bounded isolated anonymous
+  routes first. Explain the extractor failure using redacted diagnostics;
+  do not equate missing detail data with a confirmed login requirement. A
+  personal Cookie source still requires separate, explicit authorization.
 - `SESSION_REQUIRED`: the platform rejected anonymous extraction; do not loop blindly.
 - `IP_BLOCKED` or `GEO_BLOCKED`: retries with the same session and address are unlikely to help.
 - `RATE_LIMITED`: wait or reduce request volume.
