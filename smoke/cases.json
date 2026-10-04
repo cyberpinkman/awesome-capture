@@ -30,7 +30,7 @@
       "suite": "download",
       "platform": "douyin",
       "source_env": "AWESOME_CAPTURE_SMOKE_DOUYIN_BROWSER_URL",
-      "source_fingerprint": "cdb1427c3b3852c55d702eb314a15ea72bab6df1cc7a3500b7bb0e6b4c6b18bd",
+      "source_fingerprint": "4de80c64366890c0eeff5c8f04eeed58bc54d48255c613a3254496d35c66ac62",
       "required_tools": ["python", "ffmpeg", "ffprobe", "yt-dlp", "playwright", "chromium"],
       "expectation": "ephemeral_browser"
     },

@@ -18,10 +18,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Iterator
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -259,6 +262,87 @@ def sanitize_source_url(raw_url: str, platform_name: str) -> str:
     return urlunsplit(("https", parts.netloc, parts.path or "/", query, ""))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _douyin_redirect_location(url: str, timeout: float) -> str | None:
+    """Read one redirect without following it or storing response cookies."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    opener = urllib.request.build_opener(_NoRedirect())
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.headers.get("Location") if response.status in {301, 302, 303, 307, 308} else None
+    except urllib.error.HTTPError as exc:
+        try:
+            if exc.code in {301, 302, 303, 307, 308}:
+                return exc.headers.get("Location")
+            code = {404: "CONTENT_UNAVAILABLE", 410: "CONTENT_UNAVAILABLE", 429: "RATE_LIMITED"}.get(exc.code, "DOWNLOAD_FAILED")
+            raise DownloadError(
+                code, "The Douyin share link could not be resolved.",
+                details=json.dumps({"tool": "http", "http_status": exc.code}),
+            ) from exc
+        finally:
+            exc.close()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise DownloadError("NETWORK_ERROR", "The Douyin share-link request failed.") from exc
+
+
+def resolve_download_url(url: str, platform_name: str, timeout: float) -> str:
+    """Resolve only supported Douyin routes; detection and source identity stay offline."""
+    if platform_name != "douyin":
+        return url
+    deadline = time.monotonic() + timeout
+    # An explicitly supplied HTTP public link is upgraded before any request.
+    parts = urlsplit(url)
+    current = urlunsplit(("https" if parts.scheme == "http" else parts.scheme, parts.netloc, parts.path, parts.query, ""))
+    seen: set[str] = set()
+    allowed_hosts = {"douyin.com", "www.douyin.com", "v.douyin.com", "iesdouyin.com", "www.iesdouyin.com"}
+    for hop in range(6):
+        try:
+            parts = urlsplit(current)
+            safe = (
+                parts.scheme == "https" and parts.hostname in allowed_hosts
+                and parts.port in {None, 443} and not parts.username and not parts.password
+                and not any(ord(char) <= 0x20 or char == "\\" for char in current)
+            )
+        except ValueError:
+            safe = False
+        if not safe:
+            raise DownloadError("UNSUPPORTED_URL", "Douyin redirects must remain on approved HTTPS hosts.", exit_code=2)
+        path = parts.path
+        match = None
+        if parts.hostname in {"douyin.com", "www.douyin.com"}:
+            match = re.fullmatch(r"/video/([0-9]{1,32})/?", path)
+            if match:
+                return f"https://www.douyin.com/video/{match[1]}"
+            if path in {"", "/"}:
+                try:
+                    identifiers = [value for key, value in parse_qsl(parts.query, max_num_fields=16) if key == "modal_id"]
+                except ValueError:
+                    identifiers = []
+                if len(identifiers) == 1 and re.fullmatch(r"[0-9]{1,32}", identifiers[0]):
+                    return f"https://www.douyin.com/video/{identifiers[0]}"
+        elif parts.hostname in {"iesdouyin.com", "www.iesdouyin.com"}:
+            match = re.fullmatch(r"/share/video/([0-9]{1,32})/?", path)
+            if match:
+                return f"https://www.douyin.com/video/{match[1]}"
+        if parts.hostname != "v.douyin.com" or not re.fullmatch(r"/[A-Za-z0-9_-]+/?", path):
+            raise DownloadError("UNSUPPORTED_URL", "This Douyin URL does not identify a supported single video.", exit_code=2)
+        if current in seen or hop == 5:
+            raise DownloadError("UNSUPPORTED_URL", "The Douyin share link exceeded the redirect limit.", exit_code=2)
+        seen.add(current)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise DownloadError("NETWORK_ERROR", "Douyin share-link resolution timed out.")
+        location = _douyin_redirect_location(current, remaining)
+        if not location:
+            raise DownloadError("UNSUPPORTED_URL", "The Douyin share link did not resolve to a single video.", exit_code=2)
+        current = urljoin(current, location)
+    raise AssertionError("unreachable redirect state")
+
+
 def require_tool(name: str) -> str:
     value = shutil.which(name)
     if not value:
@@ -328,14 +412,31 @@ def run_checked(
             exit_code=5,
         ) from exc
     if process.returncode != 0:
-        raise classify_ytdlp_error(process.stderr or process.stdout)
+        raise classify_ytdlp_error(process.stderr or process.stdout, return_code=process.returncode)
     return process
 
 
-def classify_ytdlp_error(details: str) -> DownloadError:
+def classify_ytdlp_error(details: str, *, return_code: int | None = None) -> DownloadError:
     lower = details.lower()
+    # Raw downloader output can contain private paths, header values or signed
+    # media URLs. Preserve diagnostic facts from a closed vocabulary, not logs.
+    reasons = [
+        label for label, needles in (
+            ("invalid_json", ("jsondecodeerror", "failed to parse json", "invalid json", "expecting value")),
+            ("no_suitable_extractor", ("no suitable extractor", "unsupported url")),
+            ("fresh_session_hint", ("fresh cookies",)),
+            ("network", ("timed out", "failed to resolve", "connection error", "ssl")),
+        ) if any(needle in lower for needle in needles)
+    ]
+    diagnostic: dict[str, Any] = {
+        "tool": "yt-dlp",
+        "reasons": reasons or ["extraction_failed"],
+        "http_statuses": sorted({int(value) for value in re.findall(r"\bhttp(?: error)?[ :]+([45][0-9]{2})\b", lower)}),
+    }
+    if return_code is not None:
+        diagnostic["return_code"] = return_code
+    summary = json.dumps(diagnostic, sort_keys=True)
     cases = [
-        (("fresh cookies",), "FRESH_COOKIES_REQUIRED", "The platform requires fresh cookies.", 4),
         (
             ("sign in", "login required", "cookies are needed", "authentication required"),
             "SESSION_REQUIRED",
@@ -358,19 +459,25 @@ def classify_ytdlp_error(details: str) -> DownloadError:
             5,
         ),
         (
+            ("fresh cookies",), "FRESH_COOKIES_REQUIRED",
+            "The extractor could not obtain video details and suggested a fresh anonymous session; login has not been established as necessary.",
+            4,
+        ),
+        (
             ("failed to resolve", "temporary failure in name resolution", "timed out", "connection error", "ssl"),
             "NETWORK_ERROR",
             "A DNS, TLS, connection, or timeout error prevented access.",
             5,
         ),
-        (("unsupported url",), "UNSUPPORTED_URL", "yt-dlp does not support this URL shape.", 2),
+        (("unsupported url", "no suitable extractor"), "UNSUPPORTED_URL", "yt-dlp does not support this URL shape.", 2),
     ]
     for needles, code, message, exit_code in cases:
         if any(needle in lower for needle in needles):
-            return DownloadError(code, message, exit_code=exit_code)
+            return DownloadError(code, message, details=summary, exit_code=exit_code)
     return DownloadError(
         "DOWNLOAD_FAILED",
         "yt-dlp failed to acquire the video.",
+        details=summary,
         exit_code=5,
     )
 
@@ -403,7 +510,6 @@ def base_ytdlp_args(args: argparse.Namespace, platform_name: str) -> list[str]:
         str(args.retries),
         "--fragment-retries",
         str(args.retries),
-        "--no-warnings",
     ]
     if platform_name == "twitter":
         command.append("--force-ipv4")
@@ -615,6 +721,7 @@ def safe_metadata(info: dict[str, Any], platform: str, source_url: str) -> dict[
 
 def probe(args: argparse.Namespace) -> dict[str, Any]:
     url, platform = normalize_and_detect(args.url)
+    url = resolve_download_url(url, platform, min(args.timeout, args.socket_timeout))
     process, auth_mode, warnings = run_ytdlp(
         args,
         url=url,
@@ -2529,6 +2636,86 @@ def gallery_download(
         )
 
 
+def can_douyin_browser_fallback(args: argparse.Namespace, platform_name: str, error: DownloadError) -> bool:
+    return (
+        platform_name == "douyin"
+        and requested_auth_mode(args) == "anonymous"
+        and getattr(args, "douyin_browser_fallback", "auto") == "auto"
+        and error.code in {"FRESH_COOKIES_REQUIRED", "DOWNLOAD_FAILED"}
+    )
+
+
+def _douyin_browser_download_locked(
+    args: argparse.Namespace,
+    *,
+    url: str,
+    public_url: str,
+    layout: dict[str, Path],
+    fingerprint: str,
+    original_error: DownloadError,
+) -> dict[str, Any]:
+    from douyin_browser import DouyinBrowserError, acquire_public_video
+
+    match = re.fullmatch(r"https://www\.douyin\.com/video/([0-9]{1,32})", url)
+    if match is None:
+        raise DownloadError("UNSUPPORTED_URL", "Anonymous playback requires an identified Douyin video.", exit_code=2)
+    staging = _new_staging_directory(layout, fingerprint)
+    try:
+        staging_fd = _open_directory_chain(staging, create=False)
+        try:
+            _check_owned_directory_fd(staging_fd, private=True)
+            try:
+                captured = asyncio.run(acquire_public_video(
+                    url=url, video_id=match[1], staging_fd=staging_fd,
+                    quality=args.quality, timeout=args.timeout,
+                    wait_seconds=args.browser_wait_seconds,
+                ))
+            except DouyinBrowserError as exc:
+                raise DownloadError(
+                    exc.code, exc.message,
+                    details=json.dumps({"tool": "playwright", "previous_error": original_error.code}),
+                    exit_code=exc.exit_code,
+                ) from exc
+            current_fd = _open_directory_chain(staging, create=False)
+            try:
+                held, current = os.fstat(staging_fd), os.fstat(current_fd)
+                if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+                    raise DownloadError("RECOVERY_CONFLICT", "The browser staging directory changed during acquisition.", exit_code=4)
+            finally:
+                os.close(current_fd)
+        finally:
+            os.close(staging_fd)
+        _secure_staging_tree(staging)
+        media, _, metadata_warnings = _validated_staging_media(staging, printed_path=staging / "browser.mp4")
+        duration_ms = captured["duration_ms"]
+        if (
+            captured["info"].get("id") != match[1]
+            or type(duration_ms) is not int or duration_ms <= 0
+            or abs(ffprobe(media)["duration_ms"] - duration_ms) > 1000
+        ):
+            raise DownloadError("INTEGRITY_FAILED", "Downloaded media does not match the target playback identity and duration.", exit_code=7)
+        info = {**captured["info"], "webpage_url": url}
+        source = _source_payload(
+            info, platform_name="douyin", public_url=public_url,
+            fingerprint=fingerprint, extractor="playwright-public-page",
+        )
+        return _publish_staging(
+            layout=layout, staging=staging, staged_media=media,
+            platform_name="douyin", source=source, source_info=source,
+            tool_name="playwright", tool_version=captured["tool_version"],
+            auth_mode="ephemeral_browser", fallback="ephemeral_browser",
+            warnings=[
+                "yt-dlp detail extraction failed; acquired matching public playback through an isolated anonymous Chromium page. No user browser profile was read.",
+                "Verified complete media transfer, target video identity and playback duration before publication.",
+                *metadata_warnings,
+            ],
+        )
+    except BaseException:
+        if staging.exists():
+            _quarantine_staging(layout, staging)
+        raise
+
+
 def download(args: argparse.Namespace) -> dict[str, Any]:
     url, platform = normalize_and_detect(args.url)
     public_url = sanitize_source_url(url, platform)
@@ -2541,6 +2728,7 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
         reusable = _find_reusable(layout, platform_name=platform, fingerprint=fingerprint)
         if reusable:
             return reusable
+        url = resolve_download_url(url, platform, min(args.timeout, args.socket_timeout))
         staging = _new_staging_directory(layout, fingerprint)
         template = "%(id)s--%(title).120B.%(ext)s"
         tail = [
@@ -2569,6 +2757,11 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
             except DownloadError as error:
                 _secure_staging_tree(staging)
                 _quarantine_staging(layout, staging)
+                if can_douyin_browser_fallback(args, platform, error):
+                    return _douyin_browser_download_locked(
+                        args, url=url, public_url=public_url, layout=layout,
+                        fingerprint=fingerprint, original_error=error,
+                    )
                 if can_gallery_fallback(args, platform, error):
                     return _gallery_download_locked(
                         args,
@@ -2585,7 +2778,7 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
                 staging, printed_path=printed_path
             )
             source = _source_payload(
-                info,
+                {**info, "webpage_url": url} if platform == "douyin" else info,
                 platform_name=platform,
                 public_url=public_url,
                 fingerprint=fingerprint,

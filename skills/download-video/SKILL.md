@@ -18,8 +18,8 @@ transcription and analysis.
    python3 scripts/download_video.py detect "<url>"
    ```
 
-   `detect` returns only the sanitized public URL and its SHA-256 source
-   fingerprint. It never echoes signed or unknown query parameters.
+   `detect` is offline and returns only the sanitized input URL and its SHA-256
+   source fingerprint. It never echoes signed or unknown query parameters.
 3. Run `doctor` once per environment. It checks the tools and the secure POSIX
    runtime. If the runtime is unsupported, `yt-dlp` is stale, or
    `ffmpeg`/`ffprobe` is missing, report the exact remediation before
@@ -32,10 +32,23 @@ transcription and analysis.
    python3 scripts/download_video.py download "<url>" --output-dir "<absolute-dir>"
    ```
 
+   `probe` and `download` resolve Douyin short/share links to a canonical video
+   URL with bounded, validated redirects. Keep the input URL as source identity;
+   do not manually replace it with a guessed video URL.
 5. Apply only the bounded fallback for that platform:
-   - Douyin `FRESH_COOKIES_REQUIRED`: the default `auto` mode may open an isolated headless Chromium context, collect short-lived anonymous `.douyin.com` cookies, retry once, then delete the temporary Cookie file. It never reads the user's browser profile. Report `auth_mode: ephemeral_browser`.
+   - Douyin: in default `auto` mode, `FRESH_COOKIES_REQUIRED` may trigger
+     short-lived anonymous cookies in isolated Chromium and one yt-dlp retry.
+     Eligible extraction failures, including an initial `DOWNLOAD_FAILED`, may
+     use one isolated anonymous browser session to obtain media from details
+     matching the requested video ID. It verifies the complete HTTP body, video identity,
+     duration, and local media before publication. Report
+     `auth_mode: ephemeral_browser`, the actual producer, and warnings. No personal
+     browser profile is read; temporary cookies are deleted.
    - TikTok/X recoverable extractor or IP rejection: use `gallery-dl` once when installed. Do not use it for login, private, deleted, geo-restricted, or rate-limited content.
    - Any platform requiring the user's session: use `--cookies <netscape-file>` or `--cookies-from-browser <browser[:profile]>` only after the user explicitly authorizes that named source. Never enumerate browser profiles automatically.
+   An extractor's cookie error alone does not prove login is required. Use the
+   script's bounded anonymous routes and redacted diagnostics first. Explicit
+   login, private, geo-restricted, or rate-limited responses stop fallback.
 6. Treat success as valid only when the script exits zero and returns an
    artifact whose schema is `awesome-capture.artifact/v2`, type is `video`,
    status is `complete`, `media.has_video` is true, and current media
@@ -82,7 +95,8 @@ changed state. It never overwrites or deletes an unproven file.
   from ffprobe, and matching bytes/SHA-256 before publication.
 - Do not adopt an arbitrary pre-existing media file. Reuse is allowed only for
   a matching v2 artifact whose media is strictly revalidated.
-- Do not promise that anonymous downloading works on every network. Anti-bot sites require a current authorized session or a different network.
+- Do not promise that anonymous downloading works on every network. Report the
+  observed failure without inferring that a personal session is required.
 - The bundled X/Twitter yt-dlp and gallery-dl routes force IPv4. This is a
   transport compatibility choice for observed X media-CDN TLS EOF failures;
   it does not disable certificate checks, add authentication, or affect other
@@ -123,6 +137,11 @@ path, bytes, SHA-256, integer duration, video/audio stream counts, container,
 actual auth/fallback, warnings, producer tool/version, and the vendored
 contract digest. Producers validate it before publication; consumers must
 validate the same canonical contract and recheck authorized file context.
+For resolved Douyin links, `source.url` and its fingerprint retain the sanitized
+input, while `source.webpage_url` records the canonical video page. The anonymous
+webpage-media route records `producer.tool: playwright`,
+`acquisition.fallback: ephemeral_browser`, and an explanatory warning; temporary
+CDN URLs and raw page details are not published.
 
 This is a breaking contract change. `awesome-capture.artifact/v1`, absent
 versions, unknown versions, and legacy adjacent `<media>.artifact.json` files
